@@ -161,7 +161,7 @@ function App() {
         <nav className="main-nav" aria-label="Main navigation">
           {['Dashboard', 'My Profile', 'Applications', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
             <button type="button" key={item} className={page === item ? 'nav-item active' : 'nav-item'} onClick={() => { setPage(item); setError(''); setNotice('') }}>
-              <span className="nav-glyph" aria-hidden="true">{navGlyph(item)}</span>{item}
+              <span className="nav-glyph" aria-hidden="true"><Icon name={navGlyph(item)} /></span>{item}
               {item === 'Applications' && summary?.applications?.some((application) => application.status === 'pending') && <i className="nav-dot" />}
             </button>
           ))}
@@ -181,7 +181,7 @@ function App() {
         <header className="topbar">
           <div className="breadcrumb"><span>Kalma Connect</span><span>/</span><strong>{page}</strong></div>
           <div className="topbar-right">
-            <button type="button" className="icon-button" aria-label="Notifications" onClick={() => setPage('Notifications')}>♧</button>
+            <button type="button" className="icon-button" aria-label="Notifications" onClick={() => setPage('Notifications')}><Icon name="notifications" /></button>
             <span className="topbar-avatar">{user.name?.[0]?.toUpperCase() || 'K'}</span>
           </div>
         </header>
@@ -273,7 +273,7 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
             <label>Email address<input type="email" autoComplete="email" required maxLength={254} value={form.email} onChange={setField('email')} placeholder="you@example.com" /></label>
             {isRegister && <label>Phone number <span className="optional">Optional</span><input type="tel" autoComplete="tel" maxLength={32} value={form.phone} onChange={setField('phone')} placeholder="+234 800 000 0000" /></label>}
             <label>Password<input type="password" autoComplete={isRegister ? 'new-password' : 'current-password'} required minLength={8} value={form.password} onChange={setField('password')} placeholder="At least 8 characters" /></label>
-            {isRegister && <label>Partner code <span className="optional">Optional</span><input value={form.promoCode} onChange={setField('promoCode')} placeholder="Enter a referral code" maxLength={24} /></label>}
+            {isRegister && <label className="promo-code-field">Promo code <span className="optional">Optional</span><input autoCapitalize="characters" autoComplete="off" value={form.promoCode} onChange={setField('promoCode')} placeholder="e.g. KC-ADA02" maxLength={24} aria-describedby="promo-code-hint" /><small id="promo-code-hint">Have a partner’s code? Add it here to link your account.</small></label>}
             <button type="submit" className="primary-button full-button" disabled={busy}>{busy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'} <span>→</span></button>
           </form>
           <p className="auth-legal">By continuing, you agree to Kalma Capital’s terms and privacy policy.</p>
@@ -295,23 +295,23 @@ function DashboardPage({ summary, onNavigate }) {
         <button type="button" className="primary-button" onClick={() => onNavigate('Applications')}>Explore opportunities <span>→</span></button>
       </div>
       <section className="hero-card">
-        <div className="hero-card-copy"><span className="hero-kicker">KALMA CONNECT</span><h2>Make your next move<br />with purpose.</h2><p>Apply for an opportunity or become a Connect Partner and help more people discover Kalma.</p><button type="button" className="hero-cta" onClick={() => onNavigate('Applications')}>Find your opportunity <span>↗</span></button></div>
+        <div className="hero-card-copy"><span className="hero-kicker">KALMA CONNECT</span><h2>Make your next move<br />with purpose.</h2><p>Apply for an opportunity or become a Connect Partner and help more people discover Kalma.</p><button type="button" className="hero-cta" onClick={() => onNavigate('Applications')}>Find your opportunity <Icon name="referrals" size={18} /></button></div>
         <div className="hero-art" aria-hidden="true"><span className="art-ring ring-one" /><span className="art-ring ring-two" /><span className="art-star">✳</span><span className="art-spark">✦</span><span className="art-letter">K</span></div>
       </section>
       <div className="section-heading"><div><p className="eyebrow">YOUR OVERVIEW</p><h2>Progress at a glance</h2></div><span className="date-pill">{currentMonthLabel}</span></div>
       <div className="stat-grid">
-        <StatCard label="Applications in progress" value={activeApplications.length} caption={activeApplications.length ? 'Keep an eye on your status' : 'Start exploring opportunities'} icon="↗" tone="blue" />
-        <StatCard label="Partner referrals" value={partner?.referralCount || 0} caption={partner ? partner.promoCode : 'Partner access unlocks after approval'} icon="◎" tone="green" />
-        <StatCard label="Available earnings" value={money(partner?.availableBalanceNaira)} caption="Approved earnings ready to withdraw" icon="₦" tone="gold" />
-        <StatCard label="Partner status" value={partner ? (partner.status === 'active' ? 'Active' : 'Paused') : 'Not a partner'} caption={partner ? `Promo code · ${partner.promoCode}` : 'Apply to become a Connect Partner'} icon="✦" tone="violet" compact />
+        <StatCard label="Applications in progress" value={activeApplications.length} caption={activeApplications.length ? 'Keep an eye on your status' : 'Start exploring opportunities'} icon="applications" tone="blue" />
+        <StatCard label="Partner referrals" value={partner?.referralCount || 0} caption={partner ? partner.promoCode : 'Partner access unlocks after approval'} icon="referrals" tone="green" />
+        <StatCard label="Available earnings" value={money(partner?.availableBalanceNaira)} caption="Approved earnings ready to withdraw" icon="earnings" tone="gold" />
+        <StatCard label="Partner status" value={partner ? (partner.status === 'active' ? 'Active' : 'Paused') : 'Not a partner'} caption={partner ? `Promo code · ${partner.promoCode}` : 'Apply to become a Connect Partner'} icon="profile" tone="violet" compact />
       </div>
       <div className="content-grid">
         <section className="surface-card activity-card"><div className="card-heading"><div><p className="eyebrow">RECENT ACTIVITY</p><h3>Your applications</h3></div><button className="text-button" type="button" onClick={() => onNavigate('Applications')}>View all <span>→</span></button></div>
           {applications.length ? <div className="application-list">{applications.slice(0, 3).map((application) => <ApplicationRow key={application.id} application={application} />)}</div> : <EmptyState title="Your next step starts here" text="Explore open opportunities and submit an application when you are ready." action="Browse opportunities" onClick={() => onNavigate('Applications')} />}
         </section>
         <section className="surface-card side-card"><div className="card-heading"><div><p className="eyebrow">GET STARTED</p><h3>Choose your path</h3></div></div>
-          <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-blue">✧</span><span><strong>Find an opportunity</strong><small>Build your career with Kalma.</small></span><b>→</b></button>
-          <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-gold">↗</span><span><strong>Become a partner</strong><small>Refer and grow with us.</small></span><b>→</b></button>
+          <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-blue"><Icon name="applications" /></span><span><strong>Find an opportunity</strong><small>Build your career with Kalma.</small></span><b><Icon name="referrals" size={17} /></b></button>
+          <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-gold"><Icon name="referrals" /></span><span><strong>Become a partner</strong><small>Refer and grow with us.</small></span><b><Icon name="referrals" size={17} /></b></button>
           <div className="help-note"><span>?</span><p>Need a hand?<br /><button type="button" onClick={() => onNavigate('Support')}>Visit our support centre</button></p></div>
         </section>
       </div>
@@ -320,7 +320,7 @@ function DashboardPage({ summary, onNavigate }) {
 }
 
 function StatCard({ label, value, caption, icon, tone, compact }) {
-  return <article className="stat-card"><div className="stat-top"><span>{label}</span><span className={`stat-icon ${tone}`}>{icon}</span></div><strong className={compact ? 'stat-value compact' : 'stat-value'}>{value}</strong><small>{caption}</small></article>
+  return <article className="stat-card"><div className="stat-top"><span>{label}</span><span className={`stat-icon ${tone}`}><Icon name={icon} size={19} /></span></div><strong className={compact ? 'stat-value compact' : 'stat-value'}>{value}</strong><small>{caption}</small></article>
 }
 
 function ProfilePage({ summary, busy, onSave }) {
@@ -393,7 +393,7 @@ function ReferralTable({ referrals }) {
 function EarningsPage({ result, partner }) {
   if (!partner) return <PageTitle eyebrow="PARTNER PROGRAM" title="Earnings" subtitle="Review commissions generated from eligible partner activity."><AccessPrompt title="Earnings are available to approved partners" text="Apply to become a Connect Partner. Earnings are reviewed by the Kalma team before becoming withdrawable." /></PageTitle>
   return <PageTitle eyebrow="PARTNER PROGRAM" title="Earnings" subtitle="Your commission activity and available balance.">
-    <div className="stat-grid earnings-stats"><StatCard label="Available to withdraw" value={money(partner.availableBalanceNaira)} caption="Approved balance after active requests" icon="₦" tone="green" /><StatCard label="Pending review" value={money(partner.earnings.pendingNaira)} caption="Waiting for administrator review" icon="◷" tone="gold" /><StatCard label="Total referrals" value={partner.referralCount} caption="Accounts registered with your code" icon="◎" tone="blue" /></div>
+    <div className="stat-grid earnings-stats"><StatCard label="Available to withdraw" value={money(partner.availableBalanceNaira)} caption="Approved balance after active requests" icon="earnings" tone="green" /><StatCard label="Pending review" value={money(partner.earnings.pendingNaira)} caption="Waiting for administrator review" icon="clock" tone="gold" /><StatCard label="Total referrals" value={partner.referralCount} caption="Accounts registered with your code" icon="referrals" tone="blue" /></div>
     <section className="surface-card table-card"><div className="card-heading"><div><p className="eyebrow">COMMISSION HISTORY</p><h3>Recent earnings</h3></div></div>{result?.commissions?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Activity</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{result.commissions.map((item) => <tr key={item._id}><td>{item.type === 'registration' ? 'Registration reward' : item.type}</td><td>{date(item.createdAt)}</td><td>{money(item.amountNaira)}</td><td><span className={`status-pill ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table></div> : <EmptyState title="Your earnings will show here" text="Approved commissions will appear here after they have been reviewed." />}</section>
   </PageTitle>
 }
@@ -473,7 +473,34 @@ function AccessPrompt({ title, text }) {
 }
 
 function navGlyph(label) {
-  return ({ Dashboard: '◫', 'My Profile': '◎', Applications: '▤', Referrals: '↗', Earnings: '₦', Withdrawals: '⇄', Notifications: '♧', Support: '?', Settings: '⚙' })[label]
+  return ({
+    Dashboard: 'dashboard',
+    'My Profile': 'profile',
+    Applications: 'applications',
+    Referrals: 'referrals',
+    Earnings: 'earnings',
+    Withdrawals: 'withdrawals',
+    Notifications: 'notifications',
+    Support: 'support',
+    Settings: 'settings',
+  })[label] || 'dashboard'
+}
+
+function Icon({ name, size = 19 }) {
+  const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
+  const icons = {
+    dashboard: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></>,
+    profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
+    applications: <><path d="M8 4h8l4 4v12H4V4h4Z" /><path d="M15 4v5h5M8 13h8M8 17h6" /></>,
+    referrals: <><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="m8.3 10.8 7.3-3.6m-7.3 5.9 7.3 3.6" /></>,
+    earnings: <><circle cx="12" cy="12" r="9" /><path d="M15.5 8.5c-.7-.7-1.6-1-3-1-1.6 0-2.7.8-2.7 2s1.1 1.8 2.7 2.2 2.7 1 2.7 2.2-1.1 2.2-2.9 2.2c-1.3 0-2.4-.5-3.2-1.3M12.5 6v12" /></>,
+    withdrawals: <><path d="M7 7h12l-3-3m3 3-3 3M17 17H5l3 3m-3-3 3-3" /></>,
+    notifications: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    support: <><circle cx="12" cy="12" r="9" /><path d="M9.6 9a2.5 2.5 0 1 1 4.3 1.8c-1.1 1-1.9 1.3-1.9 2.7M12 17.2h.01" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 1 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 1 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 1 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 1 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  }
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" {...common}>{icons[name] || icons.dashboard}</svg>
 }
 
 export default App

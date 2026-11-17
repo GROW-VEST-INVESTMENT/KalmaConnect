@@ -18,6 +18,10 @@ The app uses `http://localhost:5000` for API calls during local development by d
 - Set the production Connect deployment URL as `CONNECT_APP_URL` on the backend, and allow it in the backend CORS configuration. Do not put database credentials or the JWT secret in Vercel's `VITE_*` variables.
 - The Connect backend routes must be deployed before the portal can complete applications, referrals, or withdrawals. A frontend Vercel deployment alone does not deploy the backend.
 
+## Account registration
+
+The create-account form accepts an optional partner promo code. Invite links using `?ref=CODE` prefill the field, and submitted codes are linked by the backend during registration. Users can also leave the field blank; the account is still created normally. The portal uses mobile-friendly input sizing to prevent automatic browser zoom when a form field receives focus, without disabling user-controlled page zoom.
+
 ## Partner rewards
 
 Referrals can be recorded when a new Kalma account links an active partner code. Commission rewards are disabled by default. To enable the administrator's registration-reward controls, the backend operator must set `CONNECT_COMMISSION_POLICY_APPROVED=true` only after the commission policy has been formally approved. Deposit and savings commissions are not implemented.

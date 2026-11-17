@@ -20,7 +20,7 @@ The app uses `http://localhost:5000` for API calls during local development by d
 
 ## Account registration
 
-The create-account form accepts an optional partner promo code. Invite links using `?ref=CODE` prefill the field, and submitted codes are linked by the backend during registration. Users can also leave the field blank; the account is still created normally. The portal uses mobile-friendly input sizing to prevent automatic browser zoom when a form field receives focus, without disabling user-controlled page zoom.
+Kalma Connect uses Kalma Capital accounts for applicant and partner access. Partner promo codes are not entered or claimed in Connect: customers enter a code during Kalma Capital web/mobile signup, and partner invite links open the customer signup page with `?ref=CODE`.
 
 ## Opportunity and application experience
 
@@ -30,7 +30,7 @@ The backend must be deployed with the Connect communication routes and indexes b
 
 ## Partner rewards
 
-Referrals can be recorded when a new Kalma account links an active partner code. Commission rewards are disabled by default. To enable the administrator's registration-reward controls, the backend operator must set `CONNECT_COMMISSION_POLICY_APPROVED=true` only after the commission policy has been formally approved. Deposit and savings commissions are not implemented.
+Referrals are recorded when a new Kalma Capital account is created with an active partner code. The reward schedule is ₦40 for signup, ₦60 for approved KYC, ₦200 for the first successful wallet deposit after KYC and within 60 days of signup, and ₦100 for two successful wallet deposits on separate UTC dates after KYC within those 60 days. Deposit rewards are invalidated when a qualifying deposit is refunded or reversed. The active-saver milestone measures wallet deposits, not recurring savings-plan contributions. Each reward remains pending for administrator review, and withdrawals are manual. Rewards are disabled by default; the backend operator must set `CONNECT_COMMISSION_POLICY_APPROVED=true` only after formal compliance approval and authorized rollout.
 
 Withdrawal requests are queued for staff review; staff should mark a request paid only after the payment has been completed and its reference is available. The first release does not initiate a Paystack transfer automatically.
 

@@ -16,6 +16,13 @@ const opportunityReactions = [
   ['exciting', '🔥', 'Exciting'],
   ['applause', '👏', 'Great opportunity'],
 ]
+const referralRewardLabels = {
+  registration: 'Completed signup',
+  kyc_verification: 'KYC approved',
+  first_deposit: 'First qualifying deposit',
+  active_saver: 'Active saver milestone',
+}
+const customerSignupUrl = 'https://kalmacapital.com/get-started'
 const currentMonthLabel = new Intl.DateTimeFormat('en-NG', { month: 'long', year: 'numeric' }).format(new Date())
 
 async function request(path, { method = 'GET', body, formData } = {}) {
@@ -212,8 +219,8 @@ function App() {
             }, 'Your application has been submitted for review.')}
           />}
           {page === 'Applications' && <ApplicationsPage summary={summary} busy={busy} onNavigate={setPage} onError={reportOpportunityError} onSubmit={(body) => perform(() => request('/api/connect/applications', { method: 'POST', body }), 'Your application has been submitted for review.')} />}
-          {page === 'Referrals' && <ReferralsPage result={data.Referrals} partner={summary?.partner} busy={busy} onClaim={(promoCode) => perform(() => request('/api/connect/referrals/claim', { method: 'POST', body: { promoCode } }), 'Partner code linked to your account.')} />}
-          {page === 'Earnings' && <EarningsPage result={data.Earnings} partner={summary?.partner} />}
+          {page === 'Referrals' && <ReferralsPage result={data.Referrals} partner={summary?.partner} />}
+          {page === 'Earnings' && <EarningsPage result={data.Earnings} partner={summary?.partner} policy={summary?.commissionPolicy} />}
           {page === 'Withdrawals' && <WithdrawalsPage result={data.Withdrawals} partner={summary?.partner} minimumPayoutNaira={summary?.minimumPayoutNaira} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/payouts', { method: 'POST', body }), 'Your withdrawal request has been submitted.')} />}
           {page === 'Inbox' && <InboxPage conversations={data.Inbox?.conversations || []} reloadToken={inboxReload} initialApplicationId={inboxSelection} onError={reportOpportunityError} onUpdated={reloadInbox} />}
           {page === 'Notifications' && <NotificationsPage result={data.Notifications} onOpenMessage={(applicationId) => { setInboxSelection(String(applicationId)); setPage('Inbox'); }} onRead={(id) => setData((current) => ({ ...current, Notifications: { ...current.Notifications, notifications: (current.Notifications?.notifications || []).map((item) => id ? (item.id === id ? { ...item, read: true } : item) : { ...item, read: true }) } }))} onError={reportOpportunityError} />}
@@ -231,7 +238,6 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
     email: '',
     phone: '',
     password: '',
-    promoCode: new URLSearchParams(window.location.search).get('ref') || '',
   }))
   const [localError, setLocalError] = useState('')
   const isRegister = mode === 'register'
@@ -242,9 +248,8 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
     setBusy(true)
     setLocalError('')
     try {
-      let registration
       if (isRegister) {
-        registration = await request('/api/auth/register', {
+        await request('/api/auth/register', {
           method: 'POST',
           body: {
             name: form.name,
@@ -253,13 +258,11 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
             password: form.password,
             goal: 'I’m still exploring',
             product: 'undecided',
-            promoCode: form.promoCode.trim(),
           },
         })
       }
       const { user } = await request('/api/auth/login', { method: 'POST', body: { email: form.email, password: form.password } })
-      const successMessage = registration?.promoCodeLinked ? 'Your account was created and the partner code was linked.' : ''
-      onAuthenticated(user, successMessage)
+      onAuthenticated(user)
     } catch (reason) {
       setLocalError(reason.message)
     } finally {
@@ -295,7 +298,6 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
             <label>Email address<input type="email" autoComplete="email" required maxLength={254} value={form.email} onChange={setField('email')} placeholder="you@example.com" /></label>
             {isRegister && <label>Phone number <span className="optional">Optional</span><input type="tel" autoComplete="tel" maxLength={32} value={form.phone} onChange={setField('phone')} placeholder="+234 800 000 0000" /></label>}
             <label>Password<input type="password" autoComplete={isRegister ? 'new-password' : 'current-password'} required minLength={8} value={form.password} onChange={setField('password')} placeholder="At least 8 characters" /></label>
-            {isRegister && <label className="promo-code-field">Promo code <span className="optional">Optional</span><input autoCapitalize="characters" autoComplete="off" value={form.promoCode} onChange={setField('promoCode')} placeholder="e.g. KC-ADA02" maxLength={24} aria-describedby="promo-code-hint" /><small id="promo-code-hint">Have a partner’s code? Add it here to link your account.</small></label>}
             <button type="submit" className="primary-button full-button" disabled={busy}>{busy ? 'Please wait…' : isRegister ? 'Create account' : 'Sign in'} <Icon name="arrow-right" size={18} /></button>
           </form>
           <p className="auth-legal">By continuing, you agree to Kalma Capital’s terms and privacy policy.</p>
@@ -577,21 +579,12 @@ function ApplicationDocuments({ application }) {
   >Download {document.name}</a>)}</div>
 }
 
-function ReferralsPage({ result, partner, busy, onClaim }) {
+function ReferralsPage({ result, partner }) {
   return <PageTitle eyebrow="PARTNER PROGRAM" title="Referrals" subtitle="Share your code and keep track of the people you bring into the Kalma community.">
-    {!partner ? <><AccessPrompt title="Partner tools unlock after approval" text="Submit a Connect Partner application to get your own unique code and start tracking referrals." /><ReferralCodeForm busy={busy} onClaim={onClaim} /></> :
-      <><section className="referral-banner"><div><p className="eyebrow">YOUR PARTNER CODE</p><h2>{partner.promoCode}</h2><p>Share your code or link when inviting new Kalma members.</p></div><div className="referral-actions"><button type="button" className="copy-button" onClick={() => navigator.clipboard?.writeText(partner.promoCode)}>Copy code</button><button type="button" className="copy-button" onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/?ref=${encodeURIComponent(partner.promoCode)}`)}>Copy invite link</button></div></section>
+    {!partner ? <AccessPrompt title="Partner tools unlock after approval" text="Submit a Connect Partner application to get your own unique code and start tracking referrals." /> :
+      <><section className="referral-banner"><div><p className="eyebrow">YOUR PARTNER CODE</p><h2>{partner.promoCode}</h2><p>Share this code or the customer signup link with people you invite to Kalma Capital.</p></div><div className="referral-actions"><button type="button" className="copy-button" onClick={() => navigator.clipboard?.writeText(partner.promoCode)}>Copy code</button><button type="button" className="copy-button" onClick={() => navigator.clipboard?.writeText(`${customerSignupUrl}?ref=${encodeURIComponent(partner.promoCode)}`)}>Copy customer signup link</button></div></section>
         <section className="surface-card table-card"><div className="card-heading"><div><p className="eyebrow">REFERRAL ACTIVITY</p><h3>{partner.referralCount} total signups</h3></div></div><ReferralTable referrals={result?.referrals || []} /></section></>}
   </PageTitle>
-}
-
-function ReferralCodeForm({ busy, onClaim }) {
-  const [promoCode, setPromoCode] = useState('')
-  const submit = (event) => {
-    event.preventDefault()
-    onClaim(promoCode.trim())
-  }
-  return <section className="surface-card referral-claim-card"><div><p className="eyebrow">INVITED BY A PARTNER?</p><h3>Link a partner code</h3><p className="muted">If you have not linked a referral code to this account, enter it here.</p></div><form onSubmit={submit}><input required maxLength={24} value={promoCode} onChange={(event) => setPromoCode(event.target.value)} placeholder="e.g. KC-ADA02" /><button className="primary-button" type="submit" disabled={busy}>{busy ? 'Linking…' : 'Link code'} <Icon name="arrow-right" size={18} /></button></form></section>
 }
 
 function ReferralTable({ referrals }) {
@@ -599,11 +592,21 @@ function ReferralTable({ referrals }) {
   return <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Registered</th><th>Status</th></tr></thead><tbody>{referrals.map((referral) => <tr key={referral._id}><td>{date(referral.registeredAt || referral.createdAt)}</td><td><span className={`status-pill ${referral.status}`}>{referral.status}</span></td></tr>)}</tbody></table></div>
 }
 
-function EarningsPage({ result, partner }) {
+function EarningsPage({ result, partner, policy }) {
   if (!partner) return <PageTitle eyebrow="PARTNER PROGRAM" title="Earnings" subtitle="Review commissions generated from eligible partner activity."><AccessPrompt title="Earnings are available to approved partners" text="Apply to become a Connect Partner. Earnings are reviewed by the Kalma team before becoming withdrawable." /></PageTitle>
   return <PageTitle eyebrow="PARTNER PROGRAM" title="Earnings" subtitle="Your commission activity and available balance.">
     <div className="stat-grid earnings-stats"><StatCard label="Available to withdraw" value={money(partner.availableBalanceNaira)} caption="Approved balance after active requests" icon="earnings" tone="green" /><StatCard label="Pending review" value={money(partner.earnings.pendingNaira)} caption="Waiting for administrator review" icon="clock" tone="gold" /><StatCard label="Total referrals" value={partner.referralCount} caption="Accounts registered with your code" icon="referrals" tone="blue" /></div>
-    <section className="surface-card table-card"><div className="card-heading"><div><p className="eyebrow">COMMISSION HISTORY</p><h3>Recent earnings</h3></div></div>{result?.commissions?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Activity</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{result.commissions.map((item) => <tr key={item._id}><td>{item.type === 'registration' ? 'Registration reward' : item.type}</td><td>{date(item.createdAt)}</td><td>{money(item.amountNaira)}</td><td><span className={`status-pill ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table></div> : <EmptyState title="Your earnings will show here" text="Approved commissions will appear here after they have been reviewed." />}</section>
+    {policy && <section className="surface-card table-card"><div className="card-heading"><div><p className="eyebrow">REFERRAL REWARD POLICY</p><h3>Earn across four milestones</h3></div></div>
+      {!policy.rewardsEnabled && <p className="inline-notice">Referral tracking is available, but rewards are currently disabled while the policy awaits formal approval.</p>}
+      <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Milestone</th><th>Reward</th><th>Eligibility</th></tr></thead><tbody>
+        <tr><td>Completed signup</td><td>{money(policy.registrationRewardNaira)}</td><td>New customer account registered with your code</td></tr>
+        <tr><td>KYC approved</td><td>{money(policy.kycRewardNaira)}</td><td>Customer verification approved by Kalma</td></tr>
+        <tr><td>First qualifying deposit</td><td>{money(policy.firstDepositRewardNaira)}</td><td>First successful wallet deposit after KYC and within 60 days of signup</td></tr>
+        <tr><td>Active saver</td><td>{money(policy.activeSaverBonusNaira)}</td><td>Two successful wallet deposits on separate UTC dates, after KYC and within 60 days of signup</td></tr>
+      </tbody></table></div>
+      <p className="muted">Each qualifying reward is submitted for administrator review. Payouts are not automatic; the combined schedule is capped at {money(policy.maxPerReferralNaira)} per referral.</p>
+    </section>}
+    <section className="surface-card table-card"><div className="card-heading"><div><p className="eyebrow">COMMISSION HISTORY</p><h3>Recent earnings</h3></div></div>{result?.commissions?.length ? <div className="data-table-wrap"><table className="data-table"><thead><tr><th>Activity</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>{result.commissions.map((item) => <tr key={item._id}><td>{referralRewardLabels[item.type] || 'Referral reward'}</td><td>{date(item.createdAt)}</td><td>{money(item.amountNaira)}</td><td><span className={`status-pill ${item.status}`}>{item.status}</span></td></tr>)}</tbody></table></div> : <EmptyState title="Your earnings will show here" text="Approved commissions will appear here after they have been reviewed." />}</section>
   </PageTitle>
 }
 

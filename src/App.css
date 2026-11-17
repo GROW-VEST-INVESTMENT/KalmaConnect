@@ -433,3 +433,61 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .auth-form-wrap h2 { font-size: 28px; }
   .auth-form, .stack-form { gap: 11px; }
 }
+
+.brand-symbol {
+  display: block;
+  flex: 0 0 auto;
+  padding: 0;
+  overflow: visible;
+}
+
+.app-icon {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+  transition: transform .18s ease, color .18s ease;
+}
+
+.nav-glyph {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #647a6d;
+  background: #f3f6f3;
+  transition: color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.nav-item:hover .nav-glyph { color: var(--green); background: #e8f1eb; }
+.nav-item.active .nav-glyph { color: #fff; background: var(--green); box-shadow: 0 3px 8px rgba(14, 73, 59, .18); }
+.nav-item:hover .app-icon { transform: translateY(-1px); }
+.icon-button { width: 40px; height: 40px; color: var(--green); background: #f7faf7; }
+.icon-button:hover { border-color: #cbd9ce; background: #edf4ef; }
+.stat-icon { width: 36px; height: 36px; border-radius: 11px; }
+.application-icon { width: 40px; height: 40px; border-radius: 11px; }
+.path-icon, .choice-icon { display: grid; flex: 0 0 auto; place-items: center; width: 40px; height: 40px; border-radius: 11px; }
+.path-card > b { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; color: #75867b; background: #f5f7f5; transition: color .18s ease, background .18s ease, transform .18s ease; }
+.path-card:hover > b { color: #fff; background: var(--green); transform: translateX(2px); }
+.choice-icon { margin-bottom: 4px; color: #49765e; background: #edf4ef; }
+.choice-card:nth-child(2) .choice-icon { color: #a77a3f; background: #f8f2e7; }
+.choice-card.selected .choice-icon { color: #fff; background: var(--green); }
+.help-note > span { width: 28px; height: 28px; flex: 0 0 auto; border: 0; border-radius: 8px; color: #52775e; background: #e8f0e9; }
+.empty-mark, .prompt-mark { width: 42px; height: 42px; }
+.access-mark, .notification-mark, .payout-icon, .balance-mark { flex: 0 0 auto; }
+.access-mark { width: 32px; height: 32px; border-radius: 10px; }
+.notification-mark { width: 36px; height: 36px; }
+.payout-icon { width: 36px; height: 36px; border-radius: 10px; }
+.balance-mark { width: 52px; height: 52px; }
+.secure-note-icon { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; border-radius: 9px; color: #a77c43; background: #f8f2e7; }
+.primary-button .app-icon, .hero-cta .app-icon, .text-button .app-icon { transition: transform .18s ease; }
+.primary-button:hover:not(:disabled) .app-icon, .hero-cta:hover .app-icon, .text-button:hover .app-icon { transform: translateX(3px); }
+
+@media (max-width: 760px) {
+  .nav-glyph { width: 22px; height: 22px; border-radius: 6px; background: transparent; }
+  .nav-item.active .nav-glyph { color: var(--green); background: transparent; box-shadow: none; }
+  .nav-item:hover .nav-glyph { background: transparent; }
+  .icon-button { width: 38px; height: 38px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-icon, .nav-glyph, .path-card > b { transition: none; }
+}

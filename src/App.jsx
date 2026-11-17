@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import QRCode from 'qrcode'
+import { toPng } from 'html-to-image'
 import './App.css'
 
 const API_BASE = import.meta.env.DEV
@@ -59,6 +61,16 @@ function money(value) {
 function date(value) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('en-NG', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value))
+}
+
+function idCardDate(value) {
+  if (!value) return '—'
+  return new Intl.DateTimeFormat('en-NG', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Africa/Lagos',
+  }).format(new Date(value))
 }
 
 function App() {
@@ -153,6 +165,9 @@ function App() {
     }
   }
 
+  if (window.location.pathname.startsWith('/verify-id/')) {
+    return <IdCardVerificationPage token={window.location.pathname.split('/')[2] || ''} />
+  }
   if (checking) return <div className="loading-screen"><BrandMark /><p>Preparing your workspace…</p></div>
   if (!user) {
     return (
@@ -827,10 +842,15 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
 function IdCardPage() {
   const [result, setResult] = useState(null)
   const [selectedPhoto, setSelectedPhoto] = useState(null)
+  const [qrCode, setQrCode] = useState(null)
+  const [cardSide, setCardSide] = useState('front')
+  const [exportingSide, setExportingSide] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const frontImageRef = useRef(null)
+  const backImageRef = useRef(null)
 
   useEffect(() => {
     let active = true
@@ -867,6 +887,54 @@ function IdCardPage() {
 
   const card = result?.card
   const currentRequest = result?.request
+  const verificationUrl = card?.verificationId
+    ? `${window.location.origin}/verify-id/${card.verificationId}`
+    : ''
+
+  const downloadCardImage = async (side) => {
+    const node = side === 'front' ? frontImageRef.current : backImageRef.current
+    if (!node || exportingSide) return
+    setExportingSide(side)
+    setError('')
+    setNotice('')
+    try {
+      await Promise.all([...node.querySelectorAll('img')].map((image) => image.decode()))
+      const dataUrl = await toPng(node, {
+        pixelRatio: 3,
+        cacheBust: true,
+        fetchRequestInit: { credentials: 'include' },
+        backgroundColor: side === 'front' ? '#0c3028' : '#f5f3ea',
+      })
+      const link = document.createElement('a')
+      link.href = dataUrl
+      link.download = `${card.employeeId.toLowerCase()}-${side}.png`
+      link.click()
+      setNotice(`ID card ${side} image downloaded.`)
+    } catch (reason) {
+      setError(`Could not create the card image. ${reason.message || 'Please try again.'}`)
+    } finally {
+      setExportingSide('')
+    }
+  }
+
+  useEffect(() => {
+    if (!verificationUrl) return undefined
+    let active = true
+    QRCode.toDataURL(verificationUrl, {
+      errorCorrectionLevel: 'Q',
+      margin: 1,
+      width: 480,
+      color: { dark: '#102d25', light: '#ffffff' },
+    })
+      .then((dataUrl) => {
+        if (active) setQrCode({ url: verificationUrl, dataUrl })
+      })
+      .catch((reason) => {
+        if (active) setError(`Could not create the card verification code: ${reason.message}`)
+      })
+    return () => { active = false }
+  }, [verificationUrl])
+
   return <PageTitle eyebrow="ASSOCIATE WORKSPACE" title="My ID card" subtitle="Request your internal Kalma Connect associate card. It is not a government-issued ID.">
     {loading ? <div className="surface-card id-card-state">Loading your eligibility and request…</div>
       : !result?.eligible ? <AccessPrompt title="Associate ID cards are for approved workers" text="Only active, admin-approved Kalma Connect associates can request an internal staff card." />
@@ -874,16 +942,33 @@ function IdCardPage() {
           {error && <div className="alert alert-error" role="alert">{error}</div>}
           {notice && <div className="alert alert-success" role="status">{notice}</div>}
           {card ? <section className="id-card-section">
-            <div className="id-card-print" aria-label="Kalma Connect associate ID card">
-              <div className="id-card-topline"><BrandMark /><span><strong>kalma</strong><small>CONNECT · ASSOCIATE</small></span><i>STAFF</i></div>
-              <div className="id-card-main"><img crossOrigin="use-credentials" src={`${API_BASE}${card.photoUrl}`} alt={`${card.name} associate portrait`} /><div><small>AUTHORIZED ASSOCIATE</small><h2>{card.name}</h2><p>{card.role}</p><strong>{card.employeeId}</strong></div></div>
-              <div className="id-card-footer"><span>Issued {date(card.issuedAt)}</span><span>Kalma Connect</span></div>
+            <div className="id-card-viewer">
+              <div className={`id-card-flipper ${cardSide === 'back' ? 'flipped' : ''}`}>
+                <IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="front" />
+                <IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="back" />
+              </div>
             </div>
-            <p className="id-card-disclaimer">Internal staff identification only. Not a government-issued identity document.</p>
-            <button type="button" className="primary-button" onClick={() => window.print()}>Print or save ID card as PDF</button>
+            <div className="id-card-controls">
+              <button type="button" className="secondary-button" onClick={() => setCardSide((side) => side === 'front' ? 'back' : 'front')} aria-pressed={cardSide === 'back'}>
+                {cardSide === 'front' ? 'Flip to back' : 'Show front'}
+              </button>
+              <button type="button" className="primary-button" onClick={() => window.print()} disabled={!qrCode || qrCode.url !== verificationUrl}>Print both sides</button>
+              <button type="button" className="secondary-button" onClick={() => downloadCardImage('front')} disabled={!qrCode || qrCode.url !== verificationUrl || Boolean(exportingSide)}>{exportingSide === 'front' ? 'Preparing image…' : 'Download front PNG'}</button>
+              <button type="button" className="secondary-button" onClick={() => downloadCardImage('back')} disabled={!qrCode || qrCode.url !== verificationUrl || Boolean(exportingSide)}>{exportingSide === 'back' ? 'Preparing image…' : 'Download back PNG'}</button>
+            </div>
+            <p className="id-card-disclaimer">CR80 size (85.6 × 54 mm). Print both faces on one sheet, cut, and laminate back-to-back. The QR code verifies current issuance status.</p>
+            <div className="id-card-image-export" aria-hidden="true">
+              <div className="id-card-image-export-face" ref={frontImageRef}><IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="front" exportImage /></div>
+              <div className="id-card-image-export-face" ref={backImageRef}><IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="back" exportImage /></div>
+            </div>
+            <div className="id-card-print-sheet" aria-hidden="true">
+              <IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="front" print />
+              <IdCardFace card={card} qrCode={qrCode?.url === verificationUrl ? qrCode.dataUrl : ''} side="back" print />
+            </div>
           </section>
             : <section className="surface-card id-card-request">
               <div className="id-card-status"><div><p className="eyebrow">INTERNAL STAFF IDENTIFICATION</p><h3>{currentRequest ? `Request ${currentRequest.status.replaceAll('_', ' ')}` : 'Request your associate ID card'}</h3></div>{currentRequest && <span className={`status-pill ${currentRequest.status}`}>{currentRequest.status.replaceAll('_', ' ')}</span>}</div>
+              {currentRequest?.status === 'revoked' && <div className="id-card-revoked-notice" role="status"><strong>This card has been unissued.</strong><p>Its QR verification will report that it is no longer valid. You can submit a new request for admin review if you still need an associate card.</p></div>}
               {currentRequest?.reviewNote && <div className="id-card-review-note"><strong>Admin note</strong><p>{currentRequest.reviewNote}</p></div>}
               {currentRequest?.status === 'pending'
                 ? <p className="id-card-help">Your photo is with the Connect admin team for review. We will notify you when they make a decision.</p>
@@ -898,6 +983,90 @@ function IdCardPage() {
             </section>}
         </>}
   </PageTitle>
+}
+
+function IdCardFace({ card, qrCode, side, print = false, exportImage = false }) {
+  const faceClass = `id-card-face id-card-${side}${print ? ' id-card-print-face' : ''}${exportImage ? ' id-card-export-face' : ''}`
+  if (side === 'front') {
+    return <article className={faceClass} aria-label={`Associate ID card ${side}`}>
+      <header className="id-card-brand-row">
+        <BrandMark />
+        <span><strong>kalma</strong><small>CAPITAL · CONNECT</small></span>
+        <i>ASSOCIATE</i>
+      </header>
+      <div className="id-card-front-body">
+        <img crossOrigin="use-credentials" src={`${API_BASE}${card.photoUrl}`} alt={`${card.name} associate portrait`} />
+        <div className="id-card-holder">
+          <small>AUTHORIZED ASSOCIATE</small>
+          <h2>{card.name}</h2>
+          <p>{card.role}</p>
+          <strong>{card.employeeId}</strong>
+        </div>
+      </div>
+      <footer className="id-card-face-footer"><span>ISSUED {idCardDate(card.issuedAt).toUpperCase()}</span><span>STAFF ID</span></footer>
+    </article>
+  }
+
+  return <article className={faceClass} aria-label={`Associate ID card ${side}`}>
+    <header className="id-card-back-heading"><span>IDENTITY VERIFICATION</span><strong>Kalma Connect</strong></header>
+    <div className="id-card-back-body">
+      <div className="id-card-back-copy">
+        <strong>Official associate card</strong>
+        <p>Scan the code to confirm this card was issued by Kalma Connect and check its current status.</p>
+        <span>INTERNAL STAFF IDENTIFICATION</span>
+      </div>
+      <div className="id-card-qr-frame">
+        {qrCode
+          ? <img src={qrCode} alt="Scan to verify this associate ID card" />
+          : <span>Preparing secure code…</span>}
+      </div>
+    </div>
+    <footer className="id-card-back-footer"><span>{card.employeeId}</span><span>Not a government-issued ID</span></footer>
+  </article>
+}
+
+function IdCardVerificationPage({ token }) {
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(/^[a-f0-9]{48}$/.test(token))
+  const validToken = /^[a-f0-9]{48}$/.test(token)
+
+  useEffect(() => {
+    if (!validToken) return undefined
+    let active = true
+    request(`/api/connect/id-cards/verify/${token}`)
+      .then((response) => { if (active) setResult(response) })
+      .catch(() => { if (active) setResult({ verified: false, status: 'unavailable' }) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [token, validToken])
+
+  const verified = result?.verified === true
+  return <main className="id-card-verification">
+    <section className="id-card-verification-panel">
+      <div className="id-card-verification-brand"><BrandMark /><span><strong>kalma</strong><small>CONNECT</small></span></div>
+      {loading
+        ? <div className="id-card-verification-loading"><span className="loading-spinner" /><p>Checking this card with Kalma Connect…</p></div>
+        : <div className={`id-card-verification-result ${verified ? 'verified' : 'unverified'}`}>
+          <span className="id-card-verification-mark" aria-hidden="true">{verified ? '✓' : '!'}</span>
+          <p className="eyebrow">CARD AUTHENTICATION</p>
+          <h1>{verified ? 'Genuine · Active' : result?.status === 'unissued' ? 'Card unissued' : result?.status === 'inactive' ? 'Issued · Inactive' : 'Unable to verify'}</h1>
+          <p className="id-card-verification-summary">{verified
+            ? 'This card was issued by Kalma Connect and the associate is currently active.'
+            : result?.status === 'unissued'
+              ? 'This card was issued by Kalma Connect, but an administrator has unissued it. It is no longer valid.'
+            : result?.status === 'inactive'
+              ? 'This card was issued by Kalma Connect, but it is no longer active.'
+              : 'This code does not match an active Kalma Connect ID card. Contact Kalma Connect to confirm.'}</p>
+          {result?.employeeId && <dl className="id-card-verification-details">
+            <div><dt>Associate</dt><dd>{result.name}</dd></div>
+            <div><dt>Staff ID</dt><dd>{result.employeeId}</dd></div>
+            <div><dt>Role</dt><dd>{result.role}</dd></div>
+            <div><dt>Issued</dt><dd>{idCardDate(result.issuedAt)}</dd></div>
+          </dl>}
+          <small className="id-card-verification-disclaimer">This confirms Kalma Connect’s issuance and current status only. It is not government identification.</small>
+        </div>}
+    </section>
+  </main>
 }
 
 function NotificationsPage({ result, onOpenMessage, onRead, onError }) {

@@ -647,6 +647,7 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
   const [nextMessageCursor, setNextMessageCursor] = useState('')
   const [loadingOlder, setLoadingOlder] = useState(false)
+  const [conversationSearch, setConversationSearch] = useState('')
   const markedConversationRef = useRef('')
 
   useEffect(() => {
@@ -701,19 +702,24 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
   }
 
   const activeConversation = conversations.find((item) => String(item.applicationId) === String(selectedId))
+  const visibleConversations = conversations.filter((item) => {
+    const text = `${item.opportunityTitle} ${item.applicationStatus} ${item.latestMessage?.body || ''}`.toLowerCase()
+    return text.includes(conversationSearch.trim().toLowerCase())
+  })
   return <PageTitle eyebrow="RECRUITMENT COMMUNICATION" title="Your inbox" subtitle="A private conversation with the Kalma Connect team about your application.">
     <div className="connect-inbox">
       <section className="surface-card inbox-list">
-        <div className="inbox-list-heading"><div><p className="eyebrow">APPLICATION THREADS</p><h3>Conversations</h3></div><span>{conversations.length}</span></div>
-        {conversations.length ? conversations.map((item) => <button type="button" className={String(item.applicationId) === String(selectedId) ? 'inbox-thread selected' : 'inbox-thread'} key={item.applicationId} onClick={() => { setLoadingThread(true); setSelectedId(String(item.applicationId)) }}>
-          <span className="inbox-thread-icon"><Icon name="applications" size={18} /></span><span className="inbox-thread-copy"><strong>{item.opportunityTitle}</strong><small>{item.latestMessage?.body || 'Your application conversation will appear here.'}</small><small>{item.applicationStatus.replaceAll('_', ' ')} · {item.latestMessage ? date(item.latestMessage.createdAt) : 'No messages yet'}</small></span>{item.unreadCount > 0 && <span className="inbox-unread-count">{item.unreadCount}</span>}
-        </button>) : <EmptyState title="No application threads yet" text="Once you submit an application, its private recruitment conversation will appear here." />}
+        <div className="inbox-list-heading"><div><p className="eyebrow">YOUR PRIVATE MESSAGES</p><h3>Conversations</h3><small>{conversations.length} application {conversations.length === 1 ? 'thread' : 'threads'}</small></div><span>{conversations.length}</span></div>
+        {conversations.length > 0 && <label className="inbox-search"><Icon name="search" size={16} /><input value={conversationSearch} onChange={(event) => setConversationSearch(event.target.value)} placeholder="Search conversations" aria-label="Search conversations" /></label>}
+        {conversations.length ? visibleConversations.length ? visibleConversations.map((item) => <button type="button" className={String(item.applicationId) === String(selectedId) ? 'inbox-thread selected' : 'inbox-thread'} key={item.applicationId} onClick={() => { setLoadingThread(true); setSelectedId(String(item.applicationId)) }}>
+          <span className="inbox-thread-icon"><Icon name="applications" size={18} /></span><span className="inbox-thread-copy"><strong>{item.opportunityTitle}</strong><small>{item.latestMessage?.body || 'Your application conversation will appear here.'}</small><small><span className={`inbox-thread-status ${item.applicationStatus}`}>{item.applicationStatus.replaceAll('_', ' ')}</span><span>{item.latestMessage ? date(item.latestMessage.createdAt) : 'No messages yet'}</span></small></span>{item.unreadCount > 0 && <span className="inbox-unread-count">{item.unreadCount}</span>}
+        </button>) : <EmptyState title="No matching conversations" text="Try another role, status, or message keyword." /> : <EmptyState title="No application threads yet" text="Once you submit an application, its private recruitment conversation will appear here." />}
       </section>
       <section className="surface-card inbox-conversation" aria-live="polite">
         {selectedId ? <>
-          <header className="inbox-conversation-heading"><div><p className="eyebrow">APPLICATION THREAD</p><h3>{activeConversation?.opportunityTitle || thread?.opportunityTitle || 'Your application'}</h3></div>{thread && <span className={`status-pill ${thread.status}`}>{thread.status.replaceAll('_', ' ')}</span>}</header>
+          <header className="inbox-conversation-heading"><div><p className="eyebrow">PRIVATE APPLICATION THREAD</p><h3>{activeConversation?.opportunityTitle || thread?.opportunityTitle || 'Your application'}</h3><small>Messages from your Kalma Connect recruitment team</small></div>{thread && <span className={`status-pill ${thread.status}`}>{thread.status.replaceAll('_', ' ')}</span>}</header>
           <div className="inbox-message-list">{loadingThread ? <div className="opportunity-loading">Loading conversation…</div> : <>{hasOlderMessages && <button type="button" className="load-older-messages" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{messages.length ? messages.map((message) => <article key={message.id} className={`inbox-message ${message.senderRole === 'applicant' ? 'outgoing' : 'incoming'}`}><small>{message.senderRole === 'staff' ? 'Kalma Connect team' : 'You'} · {date(message.createdAt)}</small><p>{message.body}</p></article>) : <EmptyState title="Your thread is ready" text="The recruitment team will contact you here as your application progresses." />}</>}</div>
-          <form className="inbox-reply-form" onSubmit={send}><label htmlFor="inbox-reply">Reply to the recruitment team</label><textarea id="inbox-reply" rows="3" maxLength="2000" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a message…" /><div><small>{draft.length}/2000</small><button type="submit" className="primary-button" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'} <Icon name="arrow-right" size={16} /></button></div></form>
+          <form className="inbox-reply-form" onSubmit={send}><label htmlFor="inbox-reply">Reply to the recruitment team</label><textarea id="inbox-reply" rows="3" maxLength="2000" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a clear message to the recruitment team…" /><div><small>{draft.length}/2000 characters · Your conversation is private</small><button type="submit" className="primary-button" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'} <Icon name="arrow-right" size={16} /></button></div></form>
         </> : <EmptyState title="Select an application" text="Choose an application thread to view messages or reply to the Kalma Connect team." />}
       </section>
     </div>

@@ -168,9 +168,9 @@ a { color: inherit; }
 .application-info small { color: #96a098; font-size: 9px; }
 .review-note { color: #976b33 !important; }
 .status-pill { display: inline-flex; flex: 0 0 auto; align-items: center; width: fit-content; padding: 5px 8px; border-radius: 20px; color: #748078; background: #f0f2f0; text-transform: capitalize; font-size: 9px; font-weight: 600; }
-.status-pill.pending, .status-pill.in_review, .status-pill.interview_scheduled { color: #9a713b; background: #f9f1e3; }
+.status-pill.pending, .status-pill.in_review, .status-pill.interview_scheduled, .status-pill.processing, .status-pill.requires_otp { color: #9a713b; background: #f9f1e3; }
 .status-pill.approved, .status-pill.active, .status-pill.paid, .status-pill.registered { color: #367256; background: #e9f4ec; }
-.status-pill.rejected, .status-pill.suspended { color: #a15346; background: #faece9; }
+.status-pill.rejected, .status-pill.suspended, .status-pill.failed, .status-pill.reversed { color: #a15346; background: #faece9; }
 .side-card { padding: 19px 16px 13px; }
 .path-card { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid #f0f2ef; background: transparent; text-align: left; }
 .path-card > span:nth-child(2) { display: grid; flex: 1; gap: 4px; }

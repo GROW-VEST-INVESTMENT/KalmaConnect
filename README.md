@@ -22,6 +22,12 @@ The app uses `http://localhost:5000` for API calls during local development by d
 
 The create-account form accepts an optional partner promo code. Invite links using `?ref=CODE` prefill the field, and submitted codes are linked by the backend during registration. Users can also leave the field blank; the account is still created normally. The portal uses mobile-friendly input sizing to prevent automatic browser zoom when a form field receives focus, without disabling user-controlled page zoom.
 
+## Opportunity and application experience
+
+The authenticated Opportunities feed supports saving opportunities, one reaction per user (Interested, Love this, Exciting, or Great opportunity), capacity progress, and a three-step application flow with an optional private CV/document upload. Applicants can track each submission through the Applications section, receive status and message notifications, and use the Inbox for private threads tied to their applications. The inbox loads history over HTTPS; it does not require Socket.IO.
+
+The backend must be deployed with the Connect communication routes and indexes before reactions, inbox threads, or message notifications are available. Application messages are limited to 2,000 characters and visible only to the applicant and authorized Connect staff.
+
 ## Partner rewards
 
 Referrals can be recorded when a new Kalma account links an active partner code. Commission rewards are disabled by default. To enable the administrator's registration-reward controls, the backend operator must set `CONNECT_COMMISSION_POLICY_APPROVED=true` only after the commission policy has been formally approved. Deposit and savings commissions are not implemented.

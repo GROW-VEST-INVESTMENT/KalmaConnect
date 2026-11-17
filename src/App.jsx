@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import './App.css'
 
 const API_BASE = import.meta.env.DEV
   ? (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '')
   : ''
-const channels = [
+const promotionChannels = [
   ['social_media', 'Social media'],
   ['community', 'Community groups'],
   ['email', 'Email'],
   ['other', 'Other'],
+]
+const opportunityReactions = [
+  ['interested', '👍', 'Interested'],
+  ['love', '❤️', 'Love this'],
+  ['exciting', '🔥', 'Exciting'],
+  ['applause', '👏', 'Great opportunity'],
 ]
 const currentMonthLabel = new Intl.DateTimeFormat('en-NG', { month: 'long', year: 'numeric' }).format(new Date())
 
@@ -57,7 +63,10 @@ function App() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [feedReload, setFeedReload] = useState(0)
+  const [inboxReload, setInboxReload] = useState(0)
+  const [inboxSelection, setInboxSelection] = useState('')
   const reportOpportunityError = useCallback((message) => setError(message), [])
+  const reloadInbox = useCallback(() => setInboxReload((current) => current + 1), [])
 
   const loadSummary = useCallback(async () => {
     const result = await request('/api/connect/me')
@@ -84,22 +93,28 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!user || ['Profile', 'Applications', 'Opportunities', 'Settings'].includes(page)) return
+    if (!user || ['Opportunities', 'Settings'].includes(page)) return
     let active = true
+    if (['Dashboard', 'My Profile', 'Applications'].includes(page)) {
+      request('/api/connect/me')
+        .then((result) => { if (active) setSummary(result) })
+        .catch((reason) => { if (active) setError(reason.message) })
+    }
     const endpoint = {
       Dashboard: '/api/connect/opportunities?limit=3',
       Referrals: '/api/connect/referrals',
       Earnings: '/api/connect/commissions',
       Withdrawals: '/api/connect/payouts',
       Notifications: '/api/notifications',
+      Inbox: '/api/connect/inbox',
       Support: '/api/account/support',
     }[page]
-    if (!endpoint) return
+    if (!endpoint) return () => { active = false }
     request(endpoint)
       .then((result) => { if (active) setData((current) => ({ ...current, [page]: result })) })
       .catch((reason) => { if (active) setError(reason.message) })
     return () => { active = false }
-  }, [page, user])
+  }, [page, user, inboxReload])
 
   const perform = async (action, successMessage) => {
     setBusy(true)
@@ -154,10 +169,12 @@ function App() {
         </a>
         <p className="nav-label">WORKSPACE</p>
         <nav className="main-nav" aria-label="Main navigation">
-          {['Dashboard', 'My Profile', 'Opportunities', 'Applications', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
+          {['Dashboard', 'My Profile', 'Opportunities', 'Applications', 'Inbox', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
             <button type="button" key={item} className={page === item ? 'nav-item active' : 'nav-item'} onClick={() => { setPage(item); setError(''); setNotice('') }}>
               <span className="nav-glyph" aria-hidden="true"><Icon name={navGlyph(item)} /></span>{item}
-              {item === 'Applications' && summary?.applications?.some((application) => application.status === 'pending') && <i className="nav-dot" />}
+              {item === 'Applications' && summary?.applications?.some((application) => !['approved', 'rejected'].includes(application.status)) && <i className="nav-dot" />}
+              {item === 'Inbox' && data.Inbox?.conversations?.some((conversation) => conversation.unreadCount > 0) && <i className="nav-dot" />}
+              {item === 'Notifications' && data.Notifications?.notifications?.some((notification) => !notification.read) && <i className="nav-dot" />}
             </button>
           ))}
         </nav>
@@ -198,7 +215,8 @@ function App() {
           {page === 'Referrals' && <ReferralsPage result={data.Referrals} partner={summary?.partner} busy={busy} onClaim={(promoCode) => perform(() => request('/api/connect/referrals/claim', { method: 'POST', body: { promoCode } }), 'Partner code linked to your account.')} />}
           {page === 'Earnings' && <EarningsPage result={data.Earnings} partner={summary?.partner} />}
           {page === 'Withdrawals' && <WithdrawalsPage result={data.Withdrawals} partner={summary?.partner} minimumPayoutNaira={summary?.minimumPayoutNaira} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/payouts', { method: 'POST', body }), 'Your withdrawal request has been submitted.')} />}
-          {page === 'Notifications' && <NotificationsPage result={data.Notifications} />}
+          {page === 'Inbox' && <InboxPage conversations={data.Inbox?.conversations || []} reloadToken={inboxReload} initialApplicationId={inboxSelection} onError={reportOpportunityError} onUpdated={reloadInbox} />}
+          {page === 'Notifications' && <NotificationsPage result={data.Notifications} onOpenMessage={(applicationId) => { setInboxSelection(String(applicationId)); setPage('Inbox'); }} onRead={(id) => setData((current) => ({ ...current, Notifications: { ...current.Notifications, notifications: (current.Notifications?.notifications || []).map((item) => id ? (item.id === id ? { ...item, read: true } : item) : { ...item, read: true }) } }))} onError={reportOpportunityError} />}
           {page === 'Support' && <SupportPage result={data.Support} busy={busy} onSubmit={(body) => perform(() => request('/api/account/support', { method: 'POST', body }), 'Your support request has been sent.')} />}
           {page === 'Settings' && <SettingsPage user={user} onSignOut={signOut} />}
         </div>
@@ -370,7 +388,7 @@ function ApplicationsPage({ summary, busy, onNavigate, onSubmit }) {
         : applications.some((application) => application.type === 'partner' && !['approved', 'rejected'].includes(application.status))
           ? <div className="inline-notice">Your Connect Partner application is already being reviewed. You can follow its status below.</div>
         : <form className="stack-form" onSubmit={submit}>
-          <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{channels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={selectedChannels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>
+          <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{promotionChannels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={selectedChannels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>
           <label>Relevant experience or community reach <span className="optional">Optional</span><textarea rows="3" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share a little about your background…" /></label>
           <label>Why would you like to partner with Kalma?<textarea rows="4" minLength={30} maxLength={2000} required value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you hope to contribute…" /><small className="field-hint">At least 30 characters. {motivation.length}/2000</small></label>
           <button type="submit" disabled={busy || selectedChannels.length === 0} className="primary-button">{busy ? 'Submitting…' : 'Submit partner application'} <Icon name="arrow-right" size={18} /></button>
@@ -382,20 +400,32 @@ function ApplicationsPage({ summary, busy, onNavigate, onSubmit }) {
 
 function OpportunitiesPage({ reloadToken, busy, onSubmit, onError }) {
   const [view, setView] = useState('all')
+  const [typeFilter, setTypeFilter] = useState('all')
+  const [search, setSearch] = useState('')
   const [opportunities, setOpportunities] = useState([])
   const [loadedKey, setLoadedKey] = useState(null)
   const [applyingTo, setApplyingTo] = useState(null)
   const [interestBusy, setInterestBusy] = useState(false)
-  const loading = loadedKey !== `${view}-${reloadToken}`
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const loading = loadedKey !== `${view}-${typeFilter}-${reloadToken}`
   useEffect(() => {
     let active = true
-    const requestKey = `${view}-${reloadToken}`
-    request(`/api/connect/opportunities?view=${view}`)
-      .then((result) => { if (active) setOpportunities(result.opportunities || []) })
+    const requestKey = `${view}-${typeFilter}-${reloadToken}`
+    const typeQuery = typeFilter === 'all' ? '' : `&type=${encodeURIComponent(typeFilter)}`
+    request(`/api/connect/opportunities?view=${view}&page=1&limit=20${typeQuery}`)
+      .then((result) => {
+        if (!active) return
+        const records = result.opportunities || []
+        setOpportunities(records)
+        setPage(1)
+        setHasMore((result.total || 0) > records.length)
+      })
       .catch((reason) => { if (active) onError(reason.message) })
       .finally(() => { if (active) setLoadedKey(requestKey) })
     return () => { active = false }
-  }, [view, reloadToken, onError])
+  }, [view, typeFilter, reloadToken, onError])
 
   const toggleInterest = async (opportunity) => {
     setInterestBusy(true)
@@ -415,15 +445,60 @@ function OpportunitiesPage({ reloadToken, busy, onSubmit, onError }) {
     }
   }
 
+  const chooseReaction = async (opportunity, reaction) => {
+    setInterestBusy(true)
+    try {
+      const selected = opportunity.myReaction === reaction
+      const result = await request(`/api/connect/opportunities/${opportunity.id}/reaction`, {
+        method: selected ? 'DELETE' : 'PUT',
+        ...(selected ? {} : { body: { reaction } }),
+      })
+      setOpportunities((current) => current.map((item) => {
+        if (item.id !== opportunity.id) return item
+        const reactionCounts = { ...(item.reactionCounts || {}) }
+        if (item.myReaction) reactionCounts[item.myReaction] = Math.max(0, (reactionCounts[item.myReaction] || 0) - 1)
+        if (result.reaction) reactionCounts[result.reaction] = (reactionCounts[result.reaction] || 0) + 1
+        return { ...item, reactionCounts, myReaction: result.reaction }
+      }))
+    } catch (reason) {
+      onError(reason.message)
+    } finally {
+      setInterestBusy(false)
+    }
+  }
+
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const typeQuery = typeFilter === 'all' ? '' : `&type=${encodeURIComponent(typeFilter)}`
+      const result = await request(`/api/connect/opportunities?view=${view}&page=${page + 1}&limit=20${typeQuery}`)
+      const records = result.opportunities || []
+      setOpportunities((current) => [...current, ...records])
+      setPage((current) => current + 1)
+      setHasMore((page + 1) * 20 < result.total)
+    } catch (reason) {
+      onError(reason.message)
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  const matchingOpportunities = opportunities.filter((opportunity) => `${opportunity.title} ${opportunity.summary}`.toLowerCase().includes(search.trim().toLowerCase()))
+
   return <PageTitle eyebrow="DISCOVER & GROW" title="Opportunities" subtitle="Explore open roles and partner programs from the Kalma team.">
     <div className="opportunity-toolbar">
       <div className="opportunity-filters" role="group" aria-label="Filter opportunities">
         {[['all', 'Open opportunities'], ['interested', 'Interested'], ['applied', 'Applied']].map(([value, label]) => <button type="button" className={view === value ? 'selected' : ''} key={value} onClick={() => setView(value)}>{label}</button>)}
       </div>
-      <span>{opportunities.length} {opportunities.length === 1 ? 'opportunity' : 'opportunities'}</span>
+      <label className="opportunity-search"><Icon name="search" size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search opportunities" /></label>
+    </div>
+    <div className="opportunity-type-filters" role="group" aria-label="Opportunity category">
+      {[['all', 'All categories'], ['role', 'Careers'], ['partner', 'Partner programs'], ['announcement', 'Announcements']].map(([value, label]) => <button type="button" className={typeFilter === value ? 'selected' : ''} key={value} onClick={() => setTypeFilter(value)}>{label}</button>)}
+      <span>{matchingOpportunities.length} shown</span>
     </div>
     {loading ? <div className="opportunity-loading">Loading opportunities…</div>
-      : opportunities.length ? <div className="opportunity-grid">{opportunities.map((opportunity) => <article className="surface-card opportunity-card" key={opportunity.id}>
+      : matchingOpportunities.length ? <><div className="opportunity-grid">{matchingOpportunities.map((opportunity) => <article className="surface-card opportunity-card" key={opportunity.id}>
         <div className="opportunity-card-top"><span className={`opportunity-type ${opportunity.type}`}>{opportunity.type === 'role' ? 'Career opportunity' : opportunity.type === 'partner' ? 'Partner program' : 'Kalma update'}</span><small>{opportunity.deadline ? `Closes ${date(opportunity.deadline)}` : `Posted ${date(opportunity.publishedAt)}`}</small></div>
         <h2>{opportunity.title}</h2><p className="opportunity-summary">{opportunity.summary}</p>
         <p className="opportunity-description">{opportunity.description}</p>
@@ -432,15 +507,22 @@ function OpportunitiesPage({ reloadToken, busy, onSubmit, onError }) {
         {opportunity.type !== 'announcement' && <div className="opportunity-progress">
           <div><strong>{opportunity.applicationCount} / {opportunity.maximumApplications} applications</strong><span>{opportunity.positionsAvailable} positions</span></div>
           <progress value={opportunity.applicationCount} max={opportunity.maximumApplications} aria-label={`${opportunity.applicationCount} of ${opportunity.maximumApplications} applications received`} />
-          <small>{opportunity.interestedCount} interested · {opportunity.myApplicationStatus ? `Your application: ${opportunity.myApplicationStatus.replaceAll('_', ' ')}` : 'Applications reviewed by Kalma'}</small>
+          <small>{opportunity.interestedCount} following · {Math.round((opportunity.applicationCount / Math.max(opportunity.maximumApplications, 1)) * 100)}% of application capacity · {opportunity.myApplicationStatus ? `Your application: ${opportunity.myApplicationStatus.replaceAll('_', ' ')}` : 'Applications reviewed by Kalma'}</small>
         </div>}
         <div className="opportunity-actions">
-          {opportunity.type !== 'announcement' && <button type="button" className={opportunity.isInterested ? 'secondary-button interested-button' : 'secondary-button'} disabled={busy || interestBusy || (!opportunity.isOpen && !opportunity.isInterested)} onClick={() => toggleInterest(opportunity)}>{opportunity.isInterested ? '♥ Interested' : '♡ Show interest'}</button>}
+          {opportunity.type !== 'announcement' && <button type="button" className={opportunity.isInterested ? 'secondary-button interested-button' : 'secondary-button'} disabled={busy || interestBusy || (!opportunity.isOpen && !opportunity.isInterested)} onClick={() => toggleInterest(opportunity)}>{opportunity.isInterested ? 'Saved to your interests' : 'Save opportunity'}</button>}
           {opportunity.type !== 'announcement' && <button type="button" className="primary-button" disabled={busy || Boolean(opportunity.myApplicationStatus) || !opportunity.isOpen} onClick={() => setApplyingTo(applyingTo === opportunity.id ? null : opportunity.id)}>{opportunity.myApplicationStatus ? 'Application sent' : !opportunity.isOpen ? 'Applications closed' : applyingTo === opportunity.id ? 'Close form' : 'Apply now'} <Icon name="arrow-right" size={17} /></button>}
         </div>
+        <div className="opportunity-reactions" role="group" aria-label={`React to ${opportunity.title}`}>
+          {opportunityReactions.map(([key, emoji, label]) => {
+            const count = opportunity.reactionCounts?.[key] || 0
+            const selected = opportunity.myReaction === key
+            return <button type="button" key={key} className={selected ? 'reaction-button selected' : 'reaction-button'} disabled={interestBusy} aria-pressed={selected} aria-label={`${label}, ${count} reactions`} onClick={() => chooseReaction(opportunity, key)}><span aria-hidden="true">{emoji}</span><small>{count}</small></button>
+          })}
+        </div>
           {applyingTo === opportunity.id && opportunity.isOpen && !opportunity.myApplicationStatus && <OpportunityApplicationForm opportunity={opportunity} busy={busy} onSubmit={onSubmit} />}
-      </article>)}</div>
-      : <section className="surface-card"><EmptyState title={view === 'applied' ? 'No applications yet' : view === 'interested' ? 'No saved opportunities yet' : 'No open opportunities right now'} text={view === 'all' ? 'Check back soon for new openings published by the Kalma team.' : 'Opportunities you follow will appear here.'} /></section>}
+      </article>)}</div>{hasMore && <button type="button" className="load-more-opportunities" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load more opportunities'}</button>}</>
+      : <section className="surface-card"><EmptyState title={search ? 'No matching opportunities' : view === 'applied' ? 'No applications yet' : view === 'interested' ? 'No saved opportunities yet' : 'No open opportunities right now'} text={search ? 'Try another role title or clear your search.' : view === 'all' ? 'Check back soon for new openings published by the Kalma team.' : 'Opportunities you follow will appear here.'} /></section>}
   </PageTitle>
 }
 
@@ -449,8 +531,18 @@ function OpportunityApplicationForm({ opportunity, busy, onSubmit }) {
   const [experience, setExperience] = useState('')
   const [files, setFiles] = useState([])
   const [channels, setChannels] = useState([])
+  const [step, setStep] = useState(0)
+  const fileSize = files.reduce((total, file) => total + file.size, 0)
+  const fileOverLimit = files.some((file) => file.size > 10 * 1024 * 1024)
+  const canContinue = step === 0
+    ? motivation.trim().length >= 30 && (opportunity.type !== 'partner' || channels.length > 0)
+    : files.length <= 5 && !fileOverLimit && fileSize <= 20 * 1024 * 1024
   const submit = (event) => {
     event.preventDefault()
+    if (step < 2) {
+      if (canContinue) setStep((current) => current + 1)
+      return
+    }
     const formData = new FormData()
     formData.set('motivation', motivation)
     formData.set('experience', experience)
@@ -460,12 +552,18 @@ function OpportunityApplicationForm({ opportunity, busy, onSubmit }) {
   }
   const toggleChannel = (channel) => setChannels((current) => current.includes(channel) ? current.filter((item) => item !== channel) : [...current, channel])
   return <form className="opportunity-application-form" onSubmit={submit}>
-    <h3>Apply for {opportunity.title}</h3>
-    <label>Why are you interested?<textarea required minLength={30} maxLength={2000} value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you can contribute." /></label>
-    {opportunity.type === 'partner' && <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{channels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={channels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>}
-    <label>Relevant experience <span className="optional">Optional</span><textarea rows="3" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share your relevant experience." /></label>
-    <label>CV or supporting documents <span className="optional">Optional · 5 files, 10 MB each</span><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /><small className="field-hint">PDF, DOCX, JPG or PNG. Private files are visible only to you and authorized Connect staff. 20 MB total limit.</small>{files.length > 0 && <small className="field-hint">{files.map((file) => file.name).join(' · ')}</small>}{(files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 20 * 1024 * 1024) && <small className="inline-error">Choose up to five documents with a combined size under 20 MB.</small>}</label>
-    <button type="submit" className="primary-button" disabled={busy || files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 20 * 1024 * 1024 || (opportunity.type === 'partner' && channels.length === 0)}>{busy ? 'Submitting…' : 'Submit application'} <Icon name="arrow-right" size={17} /></button>
+    <div className="application-flow-heading"><div><p className="eyebrow">APPLICATION · STEP {step + 1} OF 3</p><h3>Apply for {opportunity.title}</h3></div><div className="application-step-indicator" aria-label={`Step ${step + 1} of 3`}>{[0, 1, 2].map((item) => <span className={item <= step ? 'complete' : ''} key={item} />)}</div></div>
+    {step === 0 && <>
+      <label>Why are you interested?<textarea minLength={30} maxLength={2000} value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you can contribute." /><small className="field-hint">A thoughtful answer helps the review team understand your fit. {motivation.trim().length}/2000 characters.</small></label>
+      {opportunity.type === 'partner' && <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{promotionChannels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={channels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>}
+      {motivation.trim().length > 0 && motivation.trim().length < 30 && <small className="inline-error">Please write at least 30 characters to continue.</small>}
+    </>}
+    {step === 1 && <>
+      <label>Relevant experience <span className="optional">Optional</span><textarea rows="4" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share your relevant experience, skills, or community reach." /></label>
+      <label>CV or supporting documents <span className="optional">Optional · 5 files, 10 MB each</span><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /><small className="field-hint">PDF, DOCX, JPG or PNG. Private files are visible only to you and authorized Connect staff. 20 MB total limit.</small>{files.length > 0 && <small className="field-hint">{files.map((file) => `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`).join(' · ')}</small>}{files.length > 5 && <small className="inline-error">Choose no more than five documents.</small>}{fileOverLimit && <small className="inline-error">Each document must be 10 MB or smaller.</small>}{fileSize > 20 * 1024 * 1024 && <small className="inline-error">The combined size of your documents must be 20 MB or smaller.</small>}</label>
+    </>}
+    {step === 2 && <div className="application-review-summary"><p className="eyebrow">READY TO SEND</p><h4>Review your application</h4><div><strong>Opportunity</strong><span>{opportunity.title}</span></div><div><strong>Your motivation</strong><span>{motivation}</span></div>{experience && <div><strong>Experience</strong><span>{experience}</span></div>}{channels.length > 0 && <div><strong>Promotion channels</strong><span>{channels.map((channel) => promotionChannels.find(([value]) => value === channel)?.[1]).join(', ')}</span></div>}<div><strong>Documents</strong><span>{files.length ? files.map((file) => file.name).join(', ') : 'None attached'}</span></div><small>You can follow status updates and message the recruitment team from your inbox after submitting.</small></div>}
+    <div className="application-flow-actions">{step > 0 && <button type="button" className="secondary-button" onClick={() => setStep((current) => current - 1)}>Back</button>}{step < 2 ? <button type="submit" className="primary-button" disabled={!canContinue}>Continue <Icon name="arrow-right" size={17} /></button> : <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Submitting…' : 'Submit application'} <Icon name="arrow-right" size={17} /></button>}</div>
   </form>
 }
 
@@ -539,10 +637,118 @@ function WithdrawalsPage({ result, partner, minimumPayoutNaira = 1000, busy, onS
   </PageTitle>
 }
 
-function NotificationsPage({ result }) {
-  const notifications = result?.notifications || result?.items || []
+function InboxPage({ conversations, reloadToken, initialApplicationId, onError, onUpdated }) {
+  const [selectedId, setSelectedId] = useState(initialApplicationId ? String(initialApplicationId) : '')
+  const [messages, setMessages] = useState([])
+  const [thread, setThread] = useState(null)
+  const [draft, setDraft] = useState('')
+  const [loadingThread, setLoadingThread] = useState(Boolean(initialApplicationId))
+  const [sending, setSending] = useState(false)
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [nextMessageCursor, setNextMessageCursor] = useState('')
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const markedConversationRef = useRef('')
+
+  useEffect(() => {
+    if (!selectedId) return
+    let active = true
+    request(`/api/connect/applications/${selectedId}/messages`)
+      .then((result) => {
+        if (!active) return
+        setThread(result.application)
+        setMessages(result.messages || [])
+        setHasOlderMessages(Boolean(result.hasMore))
+        setNextMessageCursor(result.nextBefore || '')
+        if (markedConversationRef.current !== selectedId) {
+          markedConversationRef.current = selectedId
+          onUpdated()
+        }
+      })
+      .catch((reason) => { if (active) onError(reason.message) })
+      .finally(() => { if (active) setLoadingThread(false) })
+    return () => { active = false }
+  }, [selectedId, reloadToken, onError, onUpdated])
+
+  const send = async (event) => {
+    event.preventDefault()
+    if (!selectedId || !draft.trim() || sending) return
+    setSending(true)
+    try {
+      const result = await request(`/api/connect/applications/${selectedId}/messages`, { method: 'POST', body: { body: draft } })
+      setMessages((current) => [...current, result.message])
+      setDraft('')
+      onUpdated()
+    } catch (reason) {
+      onError(reason.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const loadOlder = async () => {
+    if (!selectedId || !nextMessageCursor || loadingOlder) return
+    setLoadingOlder(true)
+    try {
+      const result = await request(`/api/connect/applications/${selectedId}/messages?before=${encodeURIComponent(nextMessageCursor)}`)
+      setMessages((current) => [...(result.messages || []), ...current])
+      setHasOlderMessages(Boolean(result.hasMore))
+      setNextMessageCursor(result.nextBefore || '')
+    } catch (reason) {
+      onError(reason.message)
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
+  const activeConversation = conversations.find((item) => String(item.applicationId) === String(selectedId))
+  return <PageTitle eyebrow="RECRUITMENT COMMUNICATION" title="Your inbox" subtitle="A private conversation with the Kalma Connect team about your application.">
+    <div className="connect-inbox">
+      <section className="surface-card inbox-list">
+        <div className="inbox-list-heading"><div><p className="eyebrow">APPLICATION THREADS</p><h3>Conversations</h3></div><span>{conversations.length}</span></div>
+        {conversations.length ? conversations.map((item) => <button type="button" className={String(item.applicationId) === String(selectedId) ? 'inbox-thread selected' : 'inbox-thread'} key={item.applicationId} onClick={() => { setLoadingThread(true); setSelectedId(String(item.applicationId)) }}>
+          <span className="inbox-thread-icon"><Icon name="applications" size={18} /></span><span className="inbox-thread-copy"><strong>{item.opportunityTitle}</strong><small>{item.latestMessage?.body || 'Your application conversation will appear here.'}</small><small>{item.applicationStatus.replaceAll('_', ' ')} · {item.latestMessage ? date(item.latestMessage.createdAt) : 'No messages yet'}</small></span>{item.unreadCount > 0 && <span className="inbox-unread-count">{item.unreadCount}</span>}
+        </button>) : <EmptyState title="No application threads yet" text="Once you submit an application, its private recruitment conversation will appear here." />}
+      </section>
+      <section className="surface-card inbox-conversation" aria-live="polite">
+        {selectedId ? <>
+          <header className="inbox-conversation-heading"><div><p className="eyebrow">APPLICATION THREAD</p><h3>{activeConversation?.opportunityTitle || thread?.opportunityTitle || 'Your application'}</h3></div>{thread && <span className={`status-pill ${thread.status}`}>{thread.status.replaceAll('_', ' ')}</span>}</header>
+          <div className="inbox-message-list">{loadingThread ? <div className="opportunity-loading">Loading conversation…</div> : <>{hasOlderMessages && <button type="button" className="load-older-messages" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{messages.length ? messages.map((message) => <article key={message.id} className={`inbox-message ${message.senderRole === 'applicant' ? 'outgoing' : 'incoming'}`}><small>{message.senderRole === 'staff' ? 'Kalma Connect team' : 'You'} · {date(message.createdAt)}</small><p>{message.body}</p></article>) : <EmptyState title="Your thread is ready" text="The recruitment team will contact you here as your application progresses." />}</>}</div>
+          <form className="inbox-reply-form" onSubmit={send}><label htmlFor="inbox-reply">Reply to the recruitment team</label><textarea id="inbox-reply" rows="3" maxLength="2000" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a message…" /><div><small>{draft.length}/2000</small><button type="submit" className="primary-button" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'} <Icon name="arrow-right" size={16} /></button></div></form>
+        </> : <EmptyState title="Select an application" text="Choose an application thread to view messages or reply to the Kalma Connect team." />}
+      </section>
+    </div>
+  </PageTitle>
+}
+
+function NotificationsPage({ result, onOpenMessage, onRead, onError }) {
+  const [readIds, setReadIds] = useState([])
+  const sourceNotifications = result?.notifications || result?.items || []
+  const notifications = sourceNotifications.map((item) => readIds.includes(item.id) ? { ...item, read: true } : item)
+  const markRead = async (item) => {
+    if (item.read) return
+    try {
+      await request(`/api/notifications/${item.id}/read`, { method: 'PATCH' })
+      setReadIds((current) => current.includes(item.id) ? current : [...current, item.id])
+      onRead(item.id)
+    } catch (reason) {
+      onError(reason.message)
+    }
+  }
+  const markAllRead = async () => {
+    try {
+      await request('/api/notifications/read-all', { method: 'PATCH' })
+      setReadIds((current) => [...new Set([...current, ...notifications.map((item) => item.id)])])
+      onRead(null)
+    } catch (reason) {
+      onError(reason.message)
+    }
+  }
+  const unread = notifications.filter((item) => !item.read).length
   return <PageTitle eyebrow="YOUR ACCOUNT" title="Notifications" subtitle="Important updates about your applications and Connect activity.">
-    <section className="surface-card table-card">{notifications.length ? notifications.map((item) => <div className="notification-row" key={item.id || item._id}><span className="notification-mark"><Icon name="notifications" size={17} /></span><div><strong>{item.title || 'Kalma Connect update'}</strong><p>{item.message || item.body}</p><small>{date(item.createdAt)}</small></div></div>) : <EmptyState title="You’re all caught up" text="Updates from the Kalma team will show here." />}</section>
+    <section className="surface-card table-card">
+      <div className="notification-toolbar"><span>{unread ? `${unread} unread update${unread === 1 ? '' : 's'}` : 'You are up to date'}</span>{unread > 0 && <button type="button" className="text-button" onClick={markAllRead}>Mark all as read</button>}</div>
+      {notifications.length ? notifications.map((item) => <article className={item.read ? 'notification-row' : 'notification-row unread'} key={item.id || item._id}><span className="notification-mark"><Icon name="notifications" size={17} /></span><div><strong>{item.title || 'Kalma Connect update'}</strong><p>{item.message || item.body}</p><small>{date(item.createdAt)}</small>{item.connectApplicationId && <button type="button" className="notification-open-link" onClick={async () => { await markRead(item); onOpenMessage(item.connectApplicationId) }}>Open application conversation <Icon name="arrow-right" size={14} /></button>}</div>{!item.read && <button type="button" className="mark-read-button" onClick={() => markRead(item)}>Mark read</button>}</article>) : <EmptyState title="You’re all caught up" text="Updates from the Kalma team will show here." />}
+    </section>
   </PageTitle>
 }
 
@@ -564,7 +770,15 @@ function SettingsPage({ user, onSignOut }) {
 }
 
 function ApplicationRow({ application }) {
-  return <div className="application-row"><span className={`application-icon ${application.type}`}><Icon name={application.type === 'partner' ? 'referrals' : 'applications'} size={18} /></span><div className="application-info"><strong>{application.opportunityTitle || (application.type === 'partner' ? 'Connect Partner' : application.roleInterest || 'Kalma opportunity')}</strong><small>{application.type === 'partner' ? 'Partner application' : 'Talent application'} · {date(application.createdAt)}</small>{application.reviewNote && <small className="review-note">{application.reviewNote}</small>}</div><span className={`status-pill ${application.status}`}>{application.status.replaceAll('_', ' ')}</span></div>
+  const stages = ['Submitted', 'In review', 'Interview', 'Decision']
+  const activeStage = application.status === 'pending' ? 0
+    : application.status === 'in_review' ? 1
+      : application.status === 'interview_scheduled' ? 2 : 3
+  const rejected = application.status === 'rejected'
+  return <div className="application-activity-item">
+    <div className="application-row"><span className={`application-icon ${application.type}`}><Icon name={application.type === 'partner' ? 'referrals' : 'applications'} size={18} /></span><div className="application-info"><strong>{application.opportunityTitle || (application.type === 'partner' ? 'Connect Partner' : application.roleInterest || 'Kalma opportunity')}</strong><small>{application.type === 'partner' ? 'Partner application' : 'Talent application'} · Submitted {date(application.createdAt)}</small>{application.reviewNote && <small className="review-note">{application.reviewNote}</small>}{application.interviewAt && <small className="review-note">Interview scheduled · {date(application.interviewAt)}</small>}</div><span className={`status-pill ${application.status}`}>{application.status.replaceAll('_', ' ')}</span></div>
+    <div className={`application-journey ${rejected ? 'rejected' : ''}`} aria-label={`Application progress: ${application.status.replaceAll('_', ' ')}`}>{stages.map((stage, index) => <div className={index <= activeStage ? 'complete' : ''} key={stage}><span>{index < activeStage ? '✓' : index + 1}</span><small>{stage}</small></div>)}</div>
+  </div>
 }
 
 function Detail({ label, value }) {
@@ -589,6 +803,7 @@ function navGlyph(label) {
     Opportunities: 'opportunities',
     'My Profile': 'profile',
     Applications: 'applications',
+    Inbox: 'inbox',
     Referrals: 'referrals',
     Earnings: 'earnings',
     Withdrawals: 'withdrawals',
@@ -617,8 +832,10 @@ function Icon({ name, size = 20 }) {
     earnings: <><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="M7 9h.01M17 15h.01M12 8.5v7m2-5.5c-.5-.5-1.2-.8-2-.8-1.1 0-1.8.5-1.8 1.3s.7 1.1 1.8 1.4 1.8.6 1.8 1.4-.7 1.4-1.9 1.4c-.9 0-1.6-.3-2.2-.8" /></>,
     withdrawals: <><path d="M7 7h12l-3-3m3 3-3 3M17 17H5l3 3m-3-3 3-3" /></>,
     notifications: <><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
+    inbox: <><path d="M4 5h16v14H4z" /><path d="M4 13h4l1.5 2h5L16 13h4" /></>,
     support: <><path d="M4 13v-1a8 8 0 0 1 16 0v1" /><rect x="3.5" y="12" width="4" height="7" rx="2" /><rect x="16.5" y="12" width="4" height="7" rx="2" /><path d="M17 20c-1 1-2.3 1.5-4 1.5" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="m19.4 15 .1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 1 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 1 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 1 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 1 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z" /></>,
+    search: <><circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.5 4.5" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     'arrow-right': <><path d="M5 12h14M13 6l6 6-6 6" /></>,
     'arrow-up-right': <><path d="M7 17 17 7M8 7h9v9" /></>,

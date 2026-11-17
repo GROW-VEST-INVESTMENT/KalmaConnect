@@ -134,8 +134,10 @@ function App() {
       if (successMessage) setNotice(successMessage)
       await loadSummary()
       setData({})
+      return true
     } catch (reason) {
       setError(reason.message || 'Something went wrong. Please try again.')
+      return false
     } finally {
       setBusy(false)
     }
@@ -178,7 +180,7 @@ function App() {
         </a>
         <p className="nav-label">WORKSPACE</p>
         <nav className="main-nav" aria-label="Main navigation">
-          {['Dashboard', 'My Profile', 'Opportunities', 'Applications', 'Inbox', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
+          {['Dashboard', 'My Profile', ...(summary?.associate?.status === 'active' ? ['My ID Card'] : []), 'Opportunities', 'Applications', 'Inbox', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
             <button type="button" key={item} className={page === item ? 'nav-item active' : 'nav-item'} onClick={() => { setPage(item); setError(''); setNotice('') }}>
               <span className="nav-glyph" aria-hidden="true"><Icon name={navGlyph(item)} /></span>{item}
               {item === 'Applications' && summary?.applications?.some((application) => !['approved', 'rejected'].includes(application.status)) && <i className="nav-dot" />}
@@ -190,7 +192,7 @@ function App() {
         <div className="sidebar-bottom">
           <div className="secure-note"><span className="secure-note-icon"><Icon name="sparkles" size={18} /></span><p><strong>A place to grow</strong><small>Connect with the Kalma ecosystem.</small></p></div>
           <button className="profile-chip" type="button" onClick={() => setPage('My Profile')}>
-            <span className="avatar">{user.name?.[0]?.toUpperCase() || 'K'}</span>
+            <span className="avatar">{summary?.profile?.photoUrl ? <img src={summary.profile.photoUrl} alt="" /> : user.name?.[0]?.toUpperCase() || 'K'}</span>
             <span className="profile-chip-name"><strong>{user.name}</strong><small>Kalma member</small></span>
             <span className="chip-chevron">•••</span>
           </button>
@@ -203,14 +205,25 @@ function App() {
           <div className="breadcrumb"><span>Kalma Connect</span><span>/</span><strong>{page}</strong></div>
           <div className="topbar-right">
             <button type="button" className="icon-button" aria-label="Notifications" onClick={() => setPage('Notifications')}><Icon name="notifications" /></button>
-            <span className="topbar-avatar">{user.name?.[0]?.toUpperCase() || 'K'}</span>
+            <span className="topbar-avatar">{summary?.profile?.photoUrl ? <img src={summary.profile.photoUrl} alt="" /> : user.name?.[0]?.toUpperCase() || 'K'}</span>
           </div>
         </header>
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
           {notice && <div className="alert alert-success" role="status">{notice}<button type="button" onClick={() => setNotice('')}>×</button></div>}
           {page === 'Dashboard' && <DashboardPage summary={summary} opportunities={data.Dashboard?.opportunities ?? null} onNavigate={setPage} />}
-          {page === 'My Profile' && <ProfilePage summary={summary} busy={busy} onSave={(phone) => perform(() => request('/api/account/profile', { method: 'PATCH', body: { phone } }), 'Profile updated.')} />}
+          {page === 'My Profile' && <ProfilePage
+            summary={summary}
+            busy={busy}
+            onSave={(phone) => perform(() => request('/api/account/profile', { method: 'PATCH', body: { phone } }), 'Profile updated.')}
+            onUploadPhoto={(file) => perform(() => {
+              const formData = new FormData()
+              formData.append('photo', file)
+              return request('/api/account/profile/photo', { method: 'POST', formData })
+            }, 'Profile photo updated.')}
+            onRemovePhoto={() => perform(() => request('/api/account/profile/photo', { method: 'DELETE' }), 'Profile photo removed.')}
+          />}
+          {page === 'My ID Card' && <IdCardPage />}
           {page === 'Opportunities' && <OpportunitiesPage
             reloadToken={feedReload}
             busy={busy}
@@ -358,17 +371,62 @@ function StatCard({ label, value, caption, icon, tone, compact }) {
   return <article className="stat-card"><div className="stat-top"><span>{label}</span><span className={`stat-icon ${tone}`}><Icon name={icon} size={19} /></span></div><strong className={compact ? 'stat-value compact' : 'stat-value'}>{value}</strong><small>{caption}</small></article>
 }
 
-function ProfilePage({ summary, busy, onSave }) {
+function ProfilePage({ summary, busy, onSave, onUploadPhoto, onRemovePhoto }) {
   const profile = summary?.profile || {}
   const associate = summary?.associate
   const partner = summary?.partner
   const [phone, setPhone] = useState(profile.phone || '')
+  const [selectedPhoto, setSelectedPhoto] = useState(null)
+  const [photoError, setPhotoError] = useState('')
+  const [photoPreview, setPhotoPreview] = useState('')
+  const photoInput = useRef(null)
+  useEffect(() => {
+    return () => {
+      if (photoPreview.startsWith('blob:')) URL.revokeObjectURL(photoPreview)
+    }
+  }, [photoPreview])
+  const choosePhoto = (event) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    setPhotoError('')
+    if (!file) return
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+      setPhotoError('Choose a PNG, JPEG, or WebP image.')
+      return
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setSelectedPhoto(null)
+      setPhotoPreview('')
+      setPhotoError('Choose an image smaller than 2 MB.')
+      return
+    }
+    setSelectedPhoto(file)
+    setPhotoPreview(URL.createObjectURL(file))
+  }
+  const uploadPhoto = async () => {
+    if (selectedPhoto && await onUploadPhoto(selectedPhoto)) setSelectedPhoto(null)
+  }
   const submit = (event) => {
     event.preventDefault()
     onSave(phone.trim())
   }
   return <PageTitle eyebrow="ACCOUNT" title="My profile" subtitle="Your Kalma Connect identity and access." >
-    <div className="profile-layout"><section className="surface-card profile-main"><div className="profile-identity"><span className="large-avatar">{profile.name?.[0]?.toUpperCase() || 'K'}</span><div><h3>{profile.name}</h3><p>{profile.email}</p></div></div><div className="detail-list"><Detail label="Full name" value={profile.name} /><Detail label="Email address" value={profile.email} /></div><form className="profile-phone-form" onSubmit={submit}><label>Phone number<input type="tel" maxLength={32} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+234 800 000 0000" /><small>Only your phone number can be changed here.</small></label><button className="secondary-button" type="submit" disabled={busy || phone === (profile.phone || '')}>{busy ? 'Saving…' : 'Save phone number'}</button></form></section>
+    <div className="profile-layout"><section className="surface-card profile-main"><div className="profile-identity"><span className="large-avatar">{photoPreview || profile.photoUrl ? <img src={photoPreview || profile.photoUrl} alt={`${profile.name || 'Profile'} profile`} /> : profile.name?.[0]?.toUpperCase() || 'K'}</span><div><h3>{profile.name}</h3><p>{profile.email}</p></div></div>
+      <div className="profile-photo-controls">
+        <div><strong>Profile photo</strong><small>Optional. PNG, JPEG, or WebP up to 2 MB.</small></div>
+        <input ref={photoInput} type="file" accept="image/png,image/jpeg,image/webp" onChange={choosePhoto} hidden />
+        <div className="profile-photo-actions">
+          {selectedPhoto
+            ? <><button className="secondary-button" type="button" onClick={() => setSelectedPhoto(null)} disabled={busy}>Cancel</button><button className="secondary-button" type="button" onClick={uploadPhoto} disabled={busy}>{busy ? 'Uploading…' : 'Save photo'}</button></>
+            : <button className="secondary-button" type="button" onClick={() => photoInput.current?.click()} disabled={busy || !profile.photoUploadAvailable}>{profile.photoUrl ? 'Change photo' : 'Choose photo'}</button>}
+          {profile.photoUrl && !selectedPhoto && <button className="text-button profile-remove-photo" type="button" onClick={onRemovePhoto} disabled={busy}>Remove</button>}
+        </div>
+        {!profile.photoUploadAvailable && <small className="profile-photo-unavailable">Photo uploads are temporarily unavailable.</small>}
+        {photoError && <p className="inline-error" role="alert">{photoError}</p>}
+      </div>
+      <div className="detail-list"><Detail label="Full name" value={profile.name} /><Detail label="Email address" value={profile.email} /></div><form className="profile-phone-form" onSubmit={submit}><label>Phone number<input type="tel" maxLength={32} value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="+234 800 000 0000" /><small>Only your phone number can be changed here.</small></label><button className="secondary-button" type="submit" disabled={busy || phone === (profile.phone || '')}>{busy ? 'Saving…' : 'Save phone number'}</button></form></section>
       <section className="surface-card access-card"><p className="eyebrow">YOUR ACCESS</p><h3>Connected to Kalma</h3><p className="muted">Your application and partner permissions are managed by the Kalma team.</p>{associate && <div className="access-row"><span className="access-mark"><Icon name="check" size={16} /></span><span><strong>Associate</strong><small>{associate.assignedRole}</small></span><span className="status-pill approved">Active</span></div>}{partner && <div className="access-row"><span className="access-mark"><Icon name="referrals" size={16} /></span><span><strong>Connect Partner</strong><small>Promo code · {partner.promoCode}</small></span><span className={`status-pill ${partner.status}`}>{partner.status}</span></div>}</section>
     </div>
   </PageTitle>
@@ -648,6 +706,8 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
   const [messages, setMessages] = useState([])
   const [thread, setThread] = useState(null)
   const [draft, setDraft] = useState('')
+  const [attachments, setAttachments] = useState([])
+  const [attachmentError, setAttachmentError] = useState('')
   const [loadingThread, setLoadingThread] = useState(Boolean(initialApplicationId))
   const [sending, setSending] = useState(false)
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
@@ -678,18 +738,50 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
 
   const send = async (event) => {
     event.preventDefault()
-    if (!selectedId || !draft.trim() || sending) return
+    if (!selectedId || (!draft.trim() && !attachments.length) || sending) return
     setSending(true)
     try {
-      const result = await request(`/api/connect/applications/${selectedId}/messages`, { method: 'POST', body: { body: draft } })
+      const path = `/api/connect/applications/${selectedId}/messages`
+      const result = attachments.length
+        ? await request(path, {
+          method: 'POST',
+          formData: (() => {
+            const formData = new FormData()
+            formData.append('body', draft)
+            attachments.forEach((file) => formData.append('images', file))
+            return formData
+          })(),
+        })
+        : await request(path, { method: 'POST', body: { body: draft } })
       setMessages((current) => [...current, result.message])
       setDraft('')
+      setAttachments([])
+      setAttachmentError('')
       onUpdated()
     } catch (reason) {
       onError(reason.message)
     } finally {
       setSending(false)
     }
+  }
+
+  const selectAttachments = (event) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (files.length > 3) {
+      setAttachmentError('Attach no more than three images to one message.')
+      return
+    }
+    if (files.some((file) => file.size > 5 * 1024 * 1024) || files.reduce((total, file) => total + file.size, 0) > 10 * 1024 * 1024) {
+      setAttachmentError('Each image must be 5 MB or smaller, and all images together must be 10 MB or smaller.')
+      return
+    }
+    if (files.some((file) => !['image/jpeg', 'image/png', 'image/webp'].includes(file.type))) {
+      setAttachmentError('Choose PNG, JPEG, or WebP images.')
+      return
+    }
+    setAttachmentError('')
+    setAttachments(files)
   }
 
   const loadOlder = async () => {
@@ -709,7 +801,7 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
 
   const activeConversation = conversations.find((item) => String(item.applicationId) === String(selectedId))
   const visibleConversations = conversations.filter((item) => {
-    const text = `${item.opportunityTitle} ${item.applicationStatus} ${item.latestMessage?.body || ''}`.toLowerCase()
+    const text = `${item.opportunityTitle} ${item.applicationStatus} ${item.latestMessage?.body || (item.latestMessage?.attachments?.length ? 'image attachment' : '')}`.toLowerCase()
     return text.includes(conversationSearch.trim().toLowerCase())
   })
   return <PageTitle eyebrow="RECRUITMENT COMMUNICATION" title="Your inbox" subtitle="A private conversation with the Kalma Connect team about your application.">
@@ -724,11 +816,87 @@ function InboxPage({ conversations, reloadToken, initialApplicationId, onError, 
       <section className="surface-card inbox-conversation" aria-live="polite">
         {selectedId ? <>
           <header className="inbox-conversation-heading"><div><p className="eyebrow">PRIVATE APPLICATION THREAD</p><h3>{activeConversation?.opportunityTitle || thread?.opportunityTitle || 'Your application'}</h3><small>Messages from your Kalma Connect recruitment team</small></div>{thread && <span className={`status-pill ${thread.status}`}>{thread.status.replaceAll('_', ' ')}</span>}</header>
-          <div className="inbox-message-list">{loadingThread ? <div className="opportunity-loading">Loading conversation…</div> : <>{hasOlderMessages && <button type="button" className="load-older-messages" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{messages.length ? messages.map((message) => <article key={message.id} className={`inbox-message ${message.senderRole === 'applicant' ? 'outgoing' : 'incoming'}`}><small>{message.senderRole === 'staff' ? 'Kalma Connect team' : 'You'} · {date(message.createdAt)}</small><p>{message.body}</p></article>) : <EmptyState title="Your thread is ready" text="The recruitment team will contact you here as your application progresses." />}</>}</div>
-          <form className="inbox-reply-form" onSubmit={send}><label htmlFor="inbox-reply">Reply to the recruitment team</label><textarea id="inbox-reply" rows="3" maxLength="2000" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a clear message to the recruitment team…" /><div><small>{draft.length}/2000 characters · Your conversation is private</small><button type="submit" className="primary-button" disabled={sending || !draft.trim()}>{sending ? 'Sending…' : 'Send reply'} <Icon name="arrow-right" size={16} /></button></div></form>
+          <div className="inbox-message-list">{loadingThread ? <div className="opportunity-loading">Loading conversation…</div> : <>{hasOlderMessages && <button type="button" className="load-older-messages" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages'}</button>}{messages.length ? messages.map((message) => <article key={message.id} className={`inbox-message ${message.senderRole === 'applicant' ? 'outgoing' : 'incoming'}`}><small>{message.senderRole === 'staff' ? 'Kalma Connect team' : 'You'} · {date(message.createdAt)}</small>{message.body && <p>{message.body}</p>}{message.attachments?.length > 0 && <div className="inbox-image-grid">{message.attachments.map((attachment) => <a key={attachment.id} href={`${API_BASE}/api/connect/applications/${selectedId}/messages/${message.id}/attachments/${attachment.id}`} target="_blank" rel="noreferrer"><img crossOrigin="use-credentials" src={`${API_BASE}/api/connect/applications/${selectedId}/messages/${message.id}/attachments/${attachment.id}`} alt={attachment.name} loading="lazy" /></a>)}</div>}</article>) : <EmptyState title="Your thread is ready" text="The recruitment team will contact you here as your application progresses." />}</>}</div>
+          <form className="inbox-reply-form" onSubmit={send}><label htmlFor="inbox-reply">Reply to the recruitment team</label><textarea id="inbox-reply" rows="3" maxLength="2000" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write a clear message to the recruitment team…" /><div className="inbox-attachment-controls"><label className="secondary-button" htmlFor="inbox-images">Attach images</label><input id="inbox-images" type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={selectAttachments} /><small>Up to 3 private images · 5 MB each</small></div>{attachments.length > 0 && <div className="inbox-selected-files">{attachments.map((file) => <span key={`${file.name}-${file.lastModified}`}>{file.name}</span>)}</div>}{attachmentError && <p className="inline-error" role="alert">{attachmentError}</p>}<div><small>{draft.length}/2000 characters · Your conversation is private</small><button type="submit" className="primary-button" disabled={sending || (!draft.trim() && !attachments.length)}>{sending ? 'Sending…' : 'Send reply'} <Icon name="arrow-right" size={16} /></button></div></form>
         </> : <EmptyState title="Select an application" text="Choose an application thread to view messages or reply to the Kalma Connect team." />}
       </section>
     </div>
+  </PageTitle>
+}
+
+function IdCardPage() {
+  const [result, setResult] = useState(null)
+  const [selectedPhoto, setSelectedPhoto] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+
+  useEffect(() => {
+    let active = true
+    request('/api/connect/id-card')
+      .then((response) => { if (active) setResult(response) })
+      .catch((reason) => { if (active) setError(reason.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => () => {
+    if (selectedPhoto?.previewUrl) URL.revokeObjectURL(selectedPhoto.previewUrl)
+  }, [selectedPhoto])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    if (!selectedPhoto || sending) return
+    setSending(true)
+    setError('')
+    setNotice('')
+    try {
+      const formData = new FormData()
+      formData.append('photo', selectedPhoto.file)
+      const response = await request('/api/connect/id-card', { method: 'POST', formData })
+      setResult((current) => ({ ...current, request: response.request, card: null }))
+      setSelectedPhoto(null)
+      setNotice(response.message)
+    } catch (reason) {
+      setError(reason.message)
+    } finally {
+      setSending(false)
+    }
+  }
+
+  const card = result?.card
+  const currentRequest = result?.request
+  return <PageTitle eyebrow="ASSOCIATE WORKSPACE" title="My ID card" subtitle="Request your internal Kalma Connect associate card. It is not a government-issued ID.">
+    {loading ? <div className="surface-card id-card-state">Loading your eligibility and request…</div>
+      : !result?.eligible ? <AccessPrompt title="Associate ID cards are for approved workers" text="Only active, admin-approved Kalma Connect associates can request an internal staff card." />
+        : <>
+          {error && <div className="alert alert-error" role="alert">{error}</div>}
+          {notice && <div className="alert alert-success" role="status">{notice}</div>}
+          {card ? <section className="id-card-section">
+            <div className="id-card-print" aria-label="Kalma Connect associate ID card">
+              <div className="id-card-topline"><BrandMark /><span><strong>kalma</strong><small>CONNECT · ASSOCIATE</small></span><i>STAFF</i></div>
+              <div className="id-card-main"><img crossOrigin="use-credentials" src={`${API_BASE}${card.photoUrl}`} alt={`${card.name} associate portrait`} /><div><small>AUTHORIZED ASSOCIATE</small><h2>{card.name}</h2><p>{card.role}</p><strong>{card.employeeId}</strong></div></div>
+              <div className="id-card-footer"><span>Issued {date(card.issuedAt)}</span><span>Kalma Connect</span></div>
+            </div>
+            <p className="id-card-disclaimer">Internal staff identification only. Not a government-issued identity document.</p>
+            <button type="button" className="primary-button" onClick={() => window.print()}>Print or save ID card as PDF</button>
+          </section>
+            : <section className="surface-card id-card-request">
+              <div className="id-card-status"><div><p className="eyebrow">INTERNAL STAFF IDENTIFICATION</p><h3>{currentRequest ? `Request ${currentRequest.status.replaceAll('_', ' ')}` : 'Request your associate ID card'}</h3></div>{currentRequest && <span className={`status-pill ${currentRequest.status}`}>{currentRequest.status.replaceAll('_', ' ')}</span>}</div>
+              {currentRequest?.reviewNote && <div className="id-card-review-note"><strong>Admin note</strong><p>{currentRequest.reviewNote}</p></div>}
+              {currentRequest?.status === 'pending'
+                ? <p className="id-card-help">Your photo is with the Connect admin team for review. We will notify you when they make a decision.</p>
+                : <form onSubmit={submit}>
+                  <label htmlFor="id-card-photo">Upload a clear headshot</label>
+                  <input id="id-card-photo" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { setError(''); const file = event.target.files?.[0]; setSelectedPhoto(file ? { file, previewUrl: URL.createObjectURL(file) } : null); event.target.value = '' }} />
+                  <small>PNG, JPEG, or WebP · maximum 2 MB. Your image is stored privately and is visible only to you and authorized admins.</small>
+                  {selectedPhoto?.previewUrl && <img className="id-card-photo-preview" src={selectedPhoto.previewUrl} alt="Selected ID card headshot preview" />}
+                  <p className="id-card-help">The card uses your account’s legal name and assigned Connect role. An admin may request additional information through your private inbox if needed.</p>
+                  <button type="submit" className="primary-button" disabled={!selectedPhoto || sending}>{sending ? 'Submitting…' : currentRequest ? 'Resubmit photo for review' : 'Submit ID card request'}</button>
+                </form>}
+            </section>}
+        </>}
   </PageTitle>
 }
 
@@ -814,6 +982,7 @@ function navGlyph(label) {
     Dashboard: 'dashboard',
     Opportunities: 'opportunities',
     'My Profile': 'profile',
+    'My ID Card': 'applications',
     Applications: 'applications',
     Inbox: 'inbox',
     Referrals: 'referrals',

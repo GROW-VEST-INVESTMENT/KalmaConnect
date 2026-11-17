@@ -22,6 +22,8 @@ const referralRewardLabels = {
   first_deposit: 'First qualifying deposit',
   active_saver: 'Active saver milestone',
 }
+const weekdayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const payoutDaysLabel = (days = [1]) => days.map((day) => weekdayNames[day]).filter(Boolean).join(', ')
 const customerSignupUrl = 'https://kalmacapital.com/get-started'
 const currentMonthLabel = new Intl.DateTimeFormat('en-NG', { month: 'long', year: 'numeric' }).format(new Date())
 
@@ -102,7 +104,7 @@ function App() {
   useEffect(() => {
     if (!user || ['Opportunities', 'Settings'].includes(page)) return
     let active = true
-    if (['Dashboard', 'My Profile', 'Applications'].includes(page)) {
+    if (['Dashboard', 'My Profile', 'Applications', 'Withdrawals'].includes(page)) {
       request('/api/connect/me')
         .then((result) => { if (active) setSummary(result) })
         .catch((reason) => { if (active) setError(reason.message) })
@@ -221,7 +223,7 @@ function App() {
           {page === 'Applications' && <ApplicationsPage summary={summary} busy={busy} onNavigate={setPage} onError={reportOpportunityError} onSubmit={(body) => perform(() => request('/api/connect/applications', { method: 'POST', body }), 'Your application has been submitted for review.')} />}
           {page === 'Referrals' && <ReferralsPage result={data.Referrals} partner={summary?.partner} />}
           {page === 'Earnings' && <EarningsPage result={data.Earnings} partner={summary?.partner} policy={summary?.commissionPolicy} />}
-          {page === 'Withdrawals' && <WithdrawalsPage result={data.Withdrawals} partner={summary?.partner} minimumPayoutNaira={summary?.minimumPayoutNaira} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/payouts', { method: 'POST', body }), 'Your withdrawal request has been submitted.')} />}
+          {page === 'Withdrawals' && <WithdrawalsPage result={data.Withdrawals} partner={summary?.partner} minimumPayoutNaira={summary?.minimumPayoutNaira} payoutDays={summary?.payoutDays} payoutTimezone={summary?.payoutTimezone} profileName={summary?.profile?.name} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/payouts', { method: 'POST', body }), 'Your withdrawal request has been submitted.')} />}
           {page === 'Inbox' && <InboxPage conversations={data.Inbox?.conversations || []} reloadToken={inboxReload} initialApplicationId={inboxSelection} onError={reportOpportunityError} onUpdated={reloadInbox} />}
           {page === 'Notifications' && <NotificationsPage result={data.Notifications} onOpenMessage={(applicationId) => { setInboxSelection(String(applicationId)); setPage('Inbox'); }} onRead={(id) => setData((current) => ({ ...current, Notifications: { ...current.Notifications, notifications: (current.Notifications?.notifications || []).map((item) => id ? (item.id === id ? { ...item, read: true } : item) : { ...item, read: true }) } }))} onError={reportOpportunityError} />}
           {page === 'Support' && <SupportPage result={data.Support} busy={busy} onSubmit={(body) => perform(() => request('/api/account/support', { method: 'POST', body }), 'Your support request has been sent.')} />}
@@ -610,7 +612,7 @@ function EarningsPage({ result, partner, policy }) {
   </PageTitle>
 }
 
-function WithdrawalsPage({ result, partner, minimumPayoutNaira = 1000, busy, onSubmit }) {
+function WithdrawalsPage({ result, partner, minimumPayoutNaira = 1000, payoutDays = [1], payoutTimezone = 'West Africa Time', profileName = '', busy, onSubmit }) {
   const [amount, setAmount] = useState('')
   const [banks, setBanks] = useState([])
   const [bankId, setBankId] = useState('')
@@ -627,8 +629,9 @@ function WithdrawalsPage({ result, partner, minimumPayoutNaira = 1000, busy, onS
   }
   return <PageTitle eyebrow="PARTNER PROGRAM" title="Withdrawals" subtitle="Request a withdrawal to one of your linked bank accounts.">
     {!partner ? <AccessPrompt title="Withdrawals unlock after partner approval" text="Withdrawals are available for approved partners with cleared earnings." /> : <>
-      <div className="withdrawal-balance"><div><p className="eyebrow">AVAILABLE BALANCE</p><strong>{money(partner.availableBalanceNaira)}</strong><small>Requests can be submitted any day. After admin approval, Paystack processes the transfer to your linked bank.</small></div><span className="balance-mark"><Icon name="banknote" size={23} /></span></div>
+      <div className="withdrawal-balance"><div><p className="eyebrow">AVAILABLE BALANCE</p><strong>{money(partner.availableBalanceNaira)}</strong><small>Requests can be submitted any day. Admin-approved Paystack transfers are scheduled for {payoutDaysLabel(payoutDays)} ({payoutTimezone} time).</small></div><span className="balance-mark"><Icon name="banknote" size={23} /></span></div>
       <div className="application-page-grid"><section className="surface-card"><p className="eyebrow">NEW REQUEST</p><h3>Withdrawal details</h3><form className="stack-form" onSubmit={submit}>
+        <p className="inline-notice">The Paystack-verified account holder name must match your Kalma Connect legal name{profileName ? ` (${profileName})` : ''}.</p>
         <label>Amount (NGN)<input type="number" min={minimumPayoutNaira} step="1" required value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="e.g. 5000" /><small className="field-hint">Minimum withdrawal: {money(minimumPayoutNaira)}. Must not exceed your available balance.</small></label>
         <label>Pay to<select required value={bankId} onChange={(event) => setBankId(event.target.value)}><option value="">Choose a linked bank account</option>{banks.map((bank) => <option value={bank.id || bank._id} key={bank.id || bank._id}>{bank.bankName} ···· {bank.accountLast4}</option>)}</select></label>
         {bankError && <p className="inline-error">{bankError}</p>}

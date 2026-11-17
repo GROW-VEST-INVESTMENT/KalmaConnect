@@ -4,14 +4,6 @@ import './App.css'
 const API_BASE = import.meta.env.DEV
   ? (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/+$/, '')
   : ''
-const opportunities = [
-  'Customer Care Assistant',
-  'Marketing Assistant',
-  'Business Development Personnel',
-  'Community Manager',
-  'Support Personnel',
-  'Other',
-]
 const channels = [
   ['social_media', 'Social media'],
   ['community', 'Community groups'],
@@ -20,7 +12,7 @@ const channels = [
 ]
 const currentMonthLabel = new Intl.DateTimeFormat('en-NG', { month: 'long', year: 'numeric' }).format(new Date())
 
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, formData } = {}) {
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: 'include',
@@ -28,7 +20,7 @@ async function request(path, { method = 'GET', body } = {}) {
       Accept: 'application/json',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : formData !== undefined ? { body: formData } : {}),
     cache: 'no-store',
   })
   let payload
@@ -64,6 +56,8 @@ function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [feedReload, setFeedReload] = useState(0)
+  const reportOpportunityError = useCallback((message) => setError(message), [])
 
   const loadSummary = useCallback(async () => {
     const result = await request('/api/connect/me')
@@ -90,9 +84,10 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!user || ['Dashboard', 'Profile', 'Applications', 'Settings'].includes(page)) return
+    if (!user || ['Profile', 'Applications', 'Opportunities', 'Settings'].includes(page)) return
     let active = true
     const endpoint = {
+      Dashboard: '/api/connect/opportunities?limit=3',
       Referrals: '/api/connect/referrals',
       Earnings: '/api/connect/commissions',
       Withdrawals: '/api/connect/payouts',
@@ -159,7 +154,7 @@ function App() {
         </a>
         <p className="nav-label">WORKSPACE</p>
         <nav className="main-nav" aria-label="Main navigation">
-          {['Dashboard', 'My Profile', 'Applications', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
+          {['Dashboard', 'My Profile', 'Opportunities', 'Applications', 'Referrals', 'Earnings', 'Withdrawals', 'Notifications', 'Support', 'Settings'].map((item) => (
             <button type="button" key={item} className={page === item ? 'nav-item active' : 'nav-item'} onClick={() => { setPage(item); setError(''); setNotice('') }}>
               <span className="nav-glyph" aria-hidden="true"><Icon name={navGlyph(item)} /></span>{item}
               {item === 'Applications' && summary?.applications?.some((application) => application.status === 'pending') && <i className="nav-dot" />}
@@ -188,9 +183,18 @@ function App() {
         <div className="page-wrap">
           {error && <div className="alert alert-error" role="alert">{error}<button type="button" onClick={() => setError('')}>×</button></div>}
           {notice && <div className="alert alert-success" role="status">{notice}<button type="button" onClick={() => setNotice('')}>×</button></div>}
-          {page === 'Dashboard' && <DashboardPage summary={summary} onNavigate={setPage} />}
+          {page === 'Dashboard' && <DashboardPage summary={summary} opportunities={data.Dashboard?.opportunities ?? null} onNavigate={setPage} />}
           {page === 'My Profile' && <ProfilePage summary={summary} busy={busy} onSave={(phone) => perform(() => request('/api/account/profile', { method: 'PATCH', body: { phone } }), 'Profile updated.')} />}
-          {page === 'Applications' && <ApplicationsPage summary={summary} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/applications', { method: 'POST', body }), 'Your application has been submitted for review.')} />}
+          {page === 'Opportunities' && <OpportunitiesPage
+            reloadToken={feedReload}
+            busy={busy}
+            onError={reportOpportunityError}
+            onSubmit={(opportunityId, formData) => perform(async () => {
+              await request(`/api/connect/opportunities/${opportunityId}/applications`, { method: 'POST', formData })
+              setFeedReload((current) => current + 1)
+            }, 'Your application has been submitted for review.')}
+          />}
+          {page === 'Applications' && <ApplicationsPage summary={summary} busy={busy} onNavigate={setPage} onError={reportOpportunityError} onSubmit={(body) => perform(() => request('/api/connect/applications', { method: 'POST', body }), 'Your application has been submitted for review.')} />}
           {page === 'Referrals' && <ReferralsPage result={data.Referrals} partner={summary?.partner} busy={busy} onClaim={(promoCode) => perform(() => request('/api/connect/referrals/claim', { method: 'POST', body: { promoCode } }), 'Partner code linked to your account.')} />}
           {page === 'Earnings' && <EarningsPage result={data.Earnings} partner={summary?.partner} />}
           {page === 'Withdrawals' && <WithdrawalsPage result={data.Withdrawals} partner={summary?.partner} minimumPayoutNaira={summary?.minimumPayoutNaira} busy={busy} onSubmit={(body) => perform(() => request('/api/connect/payouts', { method: 'POST', body }), 'Your withdrawal request has been submitted.')} />}
@@ -283,7 +287,7 @@ function AuthPage({ mode, setMode, onAuthenticated, error, busy, setBusy }) {
   )
 }
 
-function DashboardPage({ summary, onNavigate }) {
+function DashboardPage({ summary, opportunities, onNavigate }) {
   const firstName = (summary?.profile?.name || 'there').trim().split(/\s+/)[0]
   const applications = summary?.applications || []
   const activeApplications = applications.filter((application) => !['approved', 'rejected'].includes(application.status))
@@ -292,11 +296,20 @@ function DashboardPage({ summary, onNavigate }) {
     <>
       <div className="welcome-row">
         <div><p className="eyebrow">YOUR KALMA CONNECT</p><h1>Good to see you, {firstName}<span className="wave">.</span></h1><p className="muted">Your opportunities and progress, all in one place.</p></div>
-        <button type="button" className="primary-button" onClick={() => onNavigate('Applications')}>Explore opportunities <Icon name="arrow-right" size={18} /></button>
+        <button type="button" className="primary-button" onClick={() => onNavigate('Opportunities')}>Explore opportunities <Icon name="arrow-right" size={18} /></button>
       </div>
       <section className="hero-card">
-        <div className="hero-card-copy"><span className="hero-kicker">KALMA CONNECT</span><h2>Make your next move<br />with purpose.</h2><p>Apply for an opportunity or become a Connect Partner and help more people discover Kalma.</p><button type="button" className="hero-cta" onClick={() => onNavigate('Applications')}>Find your opportunity <Icon name="arrow-up-right" size={18} /></button></div>
+        <div className="hero-card-copy"><span className="hero-kicker">KALMA CONNECT</span><h2>Make your next move<br />with purpose.</h2><p>Apply for an opportunity or become a Connect Partner and help more people discover Kalma.</p><button type="button" className="hero-cta" onClick={() => onNavigate('Opportunities')}>Find your opportunity <Icon name="arrow-up-right" size={18} /></button></div>
         <div className="hero-art" aria-hidden="true"><span className="art-ring ring-one" /><span className="art-ring ring-two" /><span className="art-star">✳</span><span className="art-spark">✦</span><span className="art-letter">K</span></div>
+      </section>
+      <section className="dashboard-opportunity-feed">
+        <div className="section-heading"><div><p className="eyebrow">OPPORTUNITY FEED</p><h2>Find your next move</h2></div><button type="button" className="text-button" onClick={() => onNavigate('Opportunities')}>View all <Icon name="arrow-right" size={16} /></button></div>
+        {opportunities === null ? <div className="opportunity-loading">Loading opportunities…</div> : opportunities.length ? <div className="dashboard-opportunity-grid">{opportunities.map((opportunity) => <article className="surface-card dashboard-opportunity-card" key={opportunity.id}>
+          <span className={`opportunity-type ${opportunity.type}`}>{opportunity.type === 'role' ? 'Career opportunity' : opportunity.type === 'partner' ? 'Partner program' : 'Kalma update'}</span>
+          <h3>{opportunity.title}</h3><p>{opportunity.summary}</p>
+          {opportunity.type !== 'announcement' && <small>{opportunity.interestedCount} interested · {opportunity.applicationCount}/{opportunity.maximumApplications} applications</small>}
+          <button type="button" className="text-button" onClick={() => onNavigate('Opportunities')}>{opportunity.type === 'announcement' ? 'Read update' : 'Explore opportunity'} <Icon name="arrow-right" size={16} /></button>
+        </article>)}</div> : <section className="surface-card"><EmptyState title="No open opportunities yet" text="New roles and partner programs published by the Kalma team will appear here." /></section>}
       </section>
       <div className="section-heading"><div><p className="eyebrow">YOUR OVERVIEW</p><h2>Progress at a glance</h2></div><span className="date-pill">{currentMonthLabel}</span></div>
       <div className="stat-grid">
@@ -307,10 +320,10 @@ function DashboardPage({ summary, onNavigate }) {
       </div>
       <div className="content-grid">
         <section className="surface-card activity-card"><div className="card-heading"><div><p className="eyebrow">RECENT ACTIVITY</p><h3>Your applications</h3></div><button className="text-button" type="button" onClick={() => onNavigate('Applications')}>View all <Icon name="arrow-right" size={16} /></button></div>
-          {applications.length ? <div className="application-list">{applications.slice(0, 3).map((application) => <ApplicationRow key={application.id} application={application} />)}</div> : <EmptyState title="Your next step starts here" text="Explore open opportunities and submit an application when you are ready." action="Browse opportunities" onClick={() => onNavigate('Applications')} />}
+          {applications.length ? <div className="application-list">{applications.slice(0, 3).map((application) => <ApplicationRow key={application.id} application={application} />)}</div> : <EmptyState title="Your next step starts here" text="Explore open opportunities and submit an application when you are ready." action="Browse opportunities" onClick={() => onNavigate('Opportunities')} />}
         </section>
         <section className="surface-card side-card"><div className="card-heading"><div><p className="eyebrow">GET STARTED</p><h3>Choose your path</h3></div></div>
-          <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-blue"><Icon name="briefcase" /></span><span><strong>Find an opportunity</strong><small>Build your career with Kalma.</small></span><b><Icon name="arrow-right" size={18} /></b></button>
+          <button className="path-card" type="button" onClick={() => onNavigate('Opportunities')}><span className="path-icon path-blue"><Icon name="briefcase" /></span><span><strong>Find an opportunity</strong><small>Build your career with Kalma.</small></span><b><Icon name="arrow-right" size={18} /></b></button>
           <button className="path-card" type="button" onClick={() => onNavigate('Applications')}><span className="path-icon path-gold"><Icon name="referrals" /></span><span><strong>Become a partner</strong><small>Refer and grow with us.</small></span><b><Icon name="arrow-right" size={18} /></b></button>
           <div className="help-note"><span><Icon name="support" size={16} /></span><p>Need a hand?<br /><button type="button" onClick={() => onNavigate('Support')}>Visit our support centre</button></p></div>
         </section>
@@ -339,33 +352,131 @@ function ProfilePage({ summary, busy, onSave }) {
   </PageTitle>
 }
 
-function ApplicationsPage({ summary, busy, onSubmit }) {
-  const [type, setType] = useState('applicant')
-  const [roleInterest, setRoleInterest] = useState(opportunities[0])
+function ApplicationsPage({ summary, busy, onNavigate, onSubmit }) {
   const [motivation, setMotivation] = useState('')
   const [experience, setExperience] = useState('')
   const [selectedChannels, setSelectedChannels] = useState([])
   const applications = summary?.applications || []
-  const hasActiveApplication = applications.some((application) => application.type === type && !['approved', 'rejected'].includes(application.status))
   const toggleChannel = (value) => setSelectedChannels((current) => current.includes(value) ? current.filter((item) => item !== value) : [...current, value])
   const submit = (event) => {
     event.preventDefault()
-    onSubmit({ type, motivation, roleInterest: type === 'applicant' ? roleInterest : '', experience, promotionChannels: type === 'partner' ? selectedChannels : [] })
+    onSubmit({ type: 'partner', motivation, experience, promotionChannels: selectedChannels })
   }
-  return <PageTitle eyebrow="YOUR JOURNEY" title="Applications" subtitle="Explore a path and let us know why it is right for you.">
+  return <PageTitle eyebrow="YOUR JOURNEY" title="Applications" subtitle="Review your application progress or apply to become a Connect Partner.">
     <div className="application-page-grid"><section className="surface-card application-form-card"><div className="card-heading"><div><p className="eyebrow">NEW APPLICATION</p><h3>Tell us what you’re looking for</h3></div></div>
-      <div className="choice-row"><button type="button" className={type === 'applicant' ? 'choice-card selected' : 'choice-card'} onClick={() => setType('applicant')}><span className="choice-icon"><Icon name="briefcase" size={20} /></span><strong>Join the team</strong><small>Apply for a role at Kalma.</small></button><button type="button" className={type === 'partner' ? 'choice-card selected' : 'choice-card'} onClick={() => setType('partner')}><span className="choice-icon"><Icon name="referrals" size={20} /></span><strong>Become a partner</strong><small>Share Kalma with your network.</small></button></div>
-      {hasActiveApplication ? <div className="inline-notice">You already have an application in progress for this path. You can apply again after it has been reviewed.</div> :
-        <form className="stack-form" onSubmit={submit}>
-          {type === 'applicant' ? <label>Opportunity<select value={roleInterest} onChange={(event) => setRoleInterest(event.target.value)}>{opportunities.map((role) => <option key={role}>{role}</option>)}</select></label> :
-            <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{channels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={selectedChannels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>}
-          <label>{type === 'applicant' ? 'Relevant experience' : 'Relevant experience or community reach'} <span className="optional">Optional</span><textarea rows="3" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share a little about your background…" /></label>
-          <label>{type === 'applicant' ? 'Why are you interested in this role?' : 'Why would you like to partner with Kalma?'}<textarea rows="4" minLength={30} maxLength={2000} required value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you hope to contribute…" /><small className="field-hint">At least 30 characters. {motivation.length}/2000</small></label>
-          <button type="submit" disabled={busy || (type === 'partner' && selectedChannels.length === 0)} className="primary-button">{busy ? 'Submitting…' : 'Submit application'} <Icon name="arrow-right" size={18} /></button>
+      <div className="choice-row"><div className="choice-card selected"><span className="choice-icon"><Icon name="referrals" size={20} /></span><strong>Become a Connect Partner</strong><small>Share Kalma with your network.</small></div><button type="button" className="text-button" onClick={() => onNavigate('Opportunities')}>Browse role opportunities <Icon name="arrow-right" size={16} /></button></div>
+      {summary?.partner
+        ? <div className="inline-notice">Your Connect Partner profile is active. Manage your referrals and earnings in the partner sections.</div>
+        : applications.some((application) => application.type === 'partner' && !['approved', 'rejected'].includes(application.status))
+          ? <div className="inline-notice">Your Connect Partner application is already being reviewed. You can follow its status below.</div>
+        : <form className="stack-form" onSubmit={submit}>
+          <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{channels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={selectedChannels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>
+          <label>Relevant experience or community reach <span className="optional">Optional</span><textarea rows="3" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share a little about your background…" /></label>
+          <label>Why would you like to partner with Kalma?<textarea rows="4" minLength={30} maxLength={2000} required value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you hope to contribute…" /><small className="field-hint">At least 30 characters. {motivation.length}/2000</small></label>
+          <button type="submit" disabled={busy || selectedChannels.length === 0} className="primary-button">{busy ? 'Submitting…' : 'Submit partner application'} <Icon name="arrow-right" size={18} /></button>
         </form>}
     </section>
-    <section className="surface-card timeline-card"><p className="eyebrow">YOUR SUBMISSIONS</p><h3>Application status</h3>{applications.length ? applications.map((application) => <ApplicationRow key={application.id} application={application} />) : <EmptyState title="Nothing submitted yet" text="When you apply, the latest status will appear here." />}</section></div>
+    <section className="surface-card timeline-card"><p className="eyebrow">YOUR SUBMISSIONS</p><h3>Application status</h3>{applications.length ? applications.map((application) => <div key={application.id}><ApplicationRow application={application} /><ApplicationDocuments application={application} /></div>) : <EmptyState title="Nothing submitted yet" text="When you apply, the latest status will appear here." />}</section></div>
   </PageTitle>
+}
+
+function OpportunitiesPage({ reloadToken, busy, onSubmit, onError }) {
+  const [view, setView] = useState('all')
+  const [opportunities, setOpportunities] = useState([])
+  const [loadedKey, setLoadedKey] = useState(null)
+  const [applyingTo, setApplyingTo] = useState(null)
+  const [interestBusy, setInterestBusy] = useState(false)
+  const loading = loadedKey !== `${view}-${reloadToken}`
+  useEffect(() => {
+    let active = true
+    const requestKey = `${view}-${reloadToken}`
+    request(`/api/connect/opportunities?view=${view}`)
+      .then((result) => { if (active) setOpportunities(result.opportunities || []) })
+      .catch((reason) => { if (active) onError(reason.message) })
+      .finally(() => { if (active) setLoadedKey(requestKey) })
+    return () => { active = false }
+  }, [view, reloadToken, onError])
+
+  const toggleInterest = async (opportunity) => {
+    setInterestBusy(true)
+    try {
+      const interested = await request(`/api/connect/opportunities/${opportunity.id}/interest`, {
+        method: opportunity.isInterested ? 'DELETE' : 'PUT',
+      })
+      setOpportunities((current) => view === 'interested' && !interested.interested
+        ? current.filter((item) => item.id !== opportunity.id)
+        : current.map((item) => item.id === opportunity.id
+          ? { ...item, isInterested: interested.interested, interestedCount: Math.max(0, item.interestedCount + (interested.interested ? 1 : -1)) }
+          : item))
+    } catch (reason) {
+      onError(reason.message)
+    } finally {
+      setInterestBusy(false)
+    }
+  }
+
+  return <PageTitle eyebrow="DISCOVER & GROW" title="Opportunities" subtitle="Explore open roles and partner programs from the Kalma team.">
+    <div className="opportunity-toolbar">
+      <div className="opportunity-filters" role="group" aria-label="Filter opportunities">
+        {[['all', 'Open opportunities'], ['interested', 'Interested'], ['applied', 'Applied']].map(([value, label]) => <button type="button" className={view === value ? 'selected' : ''} key={value} onClick={() => setView(value)}>{label}</button>)}
+      </div>
+      <span>{opportunities.length} {opportunities.length === 1 ? 'opportunity' : 'opportunities'}</span>
+    </div>
+    {loading ? <div className="opportunity-loading">Loading opportunities…</div>
+      : opportunities.length ? <div className="opportunity-grid">{opportunities.map((opportunity) => <article className="surface-card opportunity-card" key={opportunity.id}>
+        <div className="opportunity-card-top"><span className={`opportunity-type ${opportunity.type}`}>{opportunity.type === 'role' ? 'Career opportunity' : opportunity.type === 'partner' ? 'Partner program' : 'Kalma update'}</span><small>{opportunity.deadline ? `Closes ${date(opportunity.deadline)}` : `Posted ${date(opportunity.publishedAt)}`}</small></div>
+        <h2>{opportunity.title}</h2><p className="opportunity-summary">{opportunity.summary}</p>
+        <p className="opportunity-description">{opportunity.description}</p>
+        {opportunity.requirements && <div className="opportunity-detail"><strong>What you’ll need</strong><p>{opportunity.requirements}</p></div>}
+        {opportunity.benefits && <div className="opportunity-detail"><strong>What we offer</strong><p>{opportunity.benefits}</p></div>}
+        {opportunity.type !== 'announcement' && <div className="opportunity-progress">
+          <div><strong>{opportunity.applicationCount} / {opportunity.maximumApplications} applications</strong><span>{opportunity.positionsAvailable} positions</span></div>
+          <progress value={opportunity.applicationCount} max={opportunity.maximumApplications} aria-label={`${opportunity.applicationCount} of ${opportunity.maximumApplications} applications received`} />
+          <small>{opportunity.interestedCount} interested · {opportunity.myApplicationStatus ? `Your application: ${opportunity.myApplicationStatus.replaceAll('_', ' ')}` : 'Applications reviewed by Kalma'}</small>
+        </div>}
+        <div className="opportunity-actions">
+          {opportunity.type !== 'announcement' && <button type="button" className={opportunity.isInterested ? 'secondary-button interested-button' : 'secondary-button'} disabled={busy || interestBusy || (!opportunity.isOpen && !opportunity.isInterested)} onClick={() => toggleInterest(opportunity)}>{opportunity.isInterested ? '♥ Interested' : '♡ Show interest'}</button>}
+          {opportunity.type !== 'announcement' && <button type="button" className="primary-button" disabled={busy || Boolean(opportunity.myApplicationStatus) || !opportunity.isOpen} onClick={() => setApplyingTo(applyingTo === opportunity.id ? null : opportunity.id)}>{opportunity.myApplicationStatus ? 'Application sent' : !opportunity.isOpen ? 'Applications closed' : applyingTo === opportunity.id ? 'Close form' : 'Apply now'} <Icon name="arrow-right" size={17} /></button>}
+        </div>
+          {applyingTo === opportunity.id && opportunity.isOpen && !opportunity.myApplicationStatus && <OpportunityApplicationForm opportunity={opportunity} busy={busy} onSubmit={onSubmit} />}
+      </article>)}</div>
+      : <section className="surface-card"><EmptyState title={view === 'applied' ? 'No applications yet' : view === 'interested' ? 'No saved opportunities yet' : 'No open opportunities right now'} text={view === 'all' ? 'Check back soon for new openings published by the Kalma team.' : 'Opportunities you follow will appear here.'} /></section>}
+  </PageTitle>
+}
+
+function OpportunityApplicationForm({ opportunity, busy, onSubmit }) {
+  const [motivation, setMotivation] = useState('')
+  const [experience, setExperience] = useState('')
+  const [files, setFiles] = useState([])
+  const [channels, setChannels] = useState([])
+  const submit = (event) => {
+    event.preventDefault()
+    const formData = new FormData()
+    formData.set('motivation', motivation)
+    formData.set('experience', experience)
+    formData.set('promotionChannels', JSON.stringify(channels))
+    files.forEach((file) => formData.append('documents', file))
+    onSubmit(opportunity.id, formData)
+  }
+  const toggleChannel = (channel) => setChannels((current) => current.includes(channel) ? current.filter((item) => item !== channel) : [...current, channel])
+  return <form className="opportunity-application-form" onSubmit={submit}>
+    <h3>Apply for {opportunity.title}</h3>
+    <label>Why are you interested?<textarea required minLength={30} maxLength={2000} value={motivation} onChange={(event) => setMotivation(event.target.value)} placeholder="Tell us what motivates you and how you can contribute." /></label>
+    {opportunity.type === 'partner' && <fieldset className="channel-field"><legend>Where would you promote Kalma?</legend><div className="channel-options">{channels.map(([value, label]) => <label key={value} className="check-option"><input type="checkbox" checked={channels.includes(value)} onChange={() => toggleChannel(value)} />{label}</label>)}</div></fieldset>}
+    <label>Relevant experience <span className="optional">Optional</span><textarea rows="3" maxLength={3000} value={experience} onChange={(event) => setExperience(event.target.value)} placeholder="Share your relevant experience." /></label>
+    <label>CV or supporting documents <span className="optional">Optional · 5 files, 10 MB each</span><input type="file" accept=".pdf,.docx,.jpg,.jpeg,.png" multiple onChange={(event) => setFiles(Array.from(event.target.files || []))} /><small className="field-hint">PDF, DOCX, JPG or PNG. Private files are visible only to you and authorized Connect staff. 20 MB total limit.</small>{files.length > 0 && <small className="field-hint">{files.map((file) => file.name).join(' · ')}</small>}{(files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 20 * 1024 * 1024) && <small className="inline-error">Choose up to five documents with a combined size under 20 MB.</small>}</label>
+    <button type="submit" className="primary-button" disabled={busy || files.length > 5 || files.reduce((total, file) => total + file.size, 0) > 20 * 1024 * 1024 || (opportunity.type === 'partner' && channels.length === 0)}>{busy ? 'Submitting…' : 'Submit application'} <Icon name="arrow-right" size={17} /></button>
+  </form>
+}
+
+function ApplicationDocuments({ application }) {
+  if (!application.documents?.length) return null
+  return <div className="application-document-list">{application.documents.map((document) => <a
+    key={document.id}
+    href={`${API_BASE}/api/connect/applications/${application.id}/documents/${document.id}`}
+    target="_blank"
+    rel="noreferrer"
+  >Download {document.name}</a>)}</div>
 }
 
 function ReferralsPage({ result, partner, busy, onClaim }) {
@@ -453,7 +564,7 @@ function SettingsPage({ user, onSignOut }) {
 }
 
 function ApplicationRow({ application }) {
-  return <div className="application-row"><span className={`application-icon ${application.type}`}><Icon name={application.type === 'partner' ? 'referrals' : 'applications'} size={18} /></span><div className="application-info"><strong>{application.type === 'partner' ? 'Connect Partner' : application.roleInterest || 'Kalma opportunity'}</strong><small>{application.type === 'partner' ? 'Partner application' : 'Talent application'} · {date(application.createdAt)}</small>{application.reviewNote && <small className="review-note">{application.reviewNote}</small>}</div><span className={`status-pill ${application.status}`}>{application.status.replaceAll('_', ' ')}</span></div>
+  return <div className="application-row"><span className={`application-icon ${application.type}`}><Icon name={application.type === 'partner' ? 'referrals' : 'applications'} size={18} /></span><div className="application-info"><strong>{application.opportunityTitle || (application.type === 'partner' ? 'Connect Partner' : application.roleInterest || 'Kalma opportunity')}</strong><small>{application.type === 'partner' ? 'Partner application' : 'Talent application'} · {date(application.createdAt)}</small>{application.reviewNote && <small className="review-note">{application.reviewNote}</small>}</div><span className={`status-pill ${application.status}`}>{application.status.replaceAll('_', ' ')}</span></div>
 }
 
 function Detail({ label, value }) {
@@ -475,6 +586,7 @@ function AccessPrompt({ title, text }) {
 function navGlyph(label) {
   return ({
     Dashboard: 'dashboard',
+    Opportunities: 'opportunities',
     'My Profile': 'profile',
     Applications: 'applications',
     Referrals: 'referrals',
@@ -497,6 +609,7 @@ function Icon({ name, size = 20 }) {
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' }
   const icons = {
     dashboard: <><rect x="3.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="3.5" width="7" height="7" rx="1.5" /><rect x="3.5" y="13.5" width="7" height="7" rx="1.5" /><rect x="13.5" y="13.5" width="7" height="7" rx="1.5" /></>,
+    opportunities: <><circle cx="12" cy="12" r="8.5" /><path d="m12 7 1.6 3.4L17 12l-3.4 1.6L12 17l-1.6-3.4L7 12l3.4-1.6L12 7Z" /></>,
     profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></>,
     applications: <><rect x="5" y="4.5" width="14" height="17" rx="2" /><path d="M9 4.5v-1h6v1M8.5 10h7M8.5 14h7M8.5 18h4" /></>,
     briefcase: <><rect x="3.5" y="7" width="17" height="13" rx="2" /><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3.5 12h17M10 12v2h4v-2" /></>,
